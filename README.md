@@ -1,0 +1,4 @@
+Nautilus
+========
+
+An IRC bot.
