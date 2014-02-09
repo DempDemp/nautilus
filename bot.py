@@ -87,7 +87,7 @@ class nautilusBot(irc.IRCClient):
         if line.startswith(('PRIVMSG', 'NOTICE')):
             length = sys.getsizeof(line) - sys.getsizeof(type(line)()) + 2
             if length <= self.floodBuffer - self._floodCurrentBuffer:
-                #  buffer isn't full, send
+                # buffer isn't full, send
                 irc.IRCClient.sendLine(self, line)
                 self.updateFloodBuffer(length)
             else:
@@ -143,10 +143,9 @@ class nautilusBotFactory(protocol.ClientFactory):
         ch = logging.StreamHandler(sys.stdout)
         ch.setLevel(logging.DEBUG)
         self.logger.addHandler(ch)
-        fh = logging.FileHandler('{}.log'.format(self.botid), encoding='utf-8')
+        fh = logging.FileHandler('%s.log' % self.botid, encoding='utf-8')
         fh.setLevel(logging.WARN)
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         fh.setFormatter(formatter)
         self.logger.addHandler(fh)
 
@@ -188,7 +187,7 @@ class nautilusBotFactory(protocol.ClientFactory):
         for m in mlist:
             loaded = True
             if not m.startswith('core.'):
-                m = 'modules.{}'.format(m)
+                m = 'modules.%s' % m
             try:
                 mo = __import__(m, globals(), locals(), ['MODCLASSES'], -1)
                 for c in mo.MODCLASSES:
@@ -199,8 +198,7 @@ class nautilusBotFactory(protocol.ClientFactory):
             if loaded:
                 self.bot.loaded_modules.append(m)
 
-    @staticmethod
-    def delete_module(modname):
+    def delete_module(self, modname):
         try:
             thismod = sys.modules[modname]
         except KeyError:
@@ -220,7 +218,7 @@ class nautilusBotFactory(protocol.ClientFactory):
 
 if __name__ == '__main__':
     with open('config.json') as f:
-        j = json.load(f.read())
+        j = json.load(f)
     for b in j['bots']:
         # create factory protocol and application
         factory = nautilusBotFactory(b['id'])
