@@ -85,13 +85,13 @@ class nautilusBot(irc.IRCClient):
             except UnicodeDecodeError:
                 pass
         if line.startswith(('PRIVMSG', 'NOTICE')):
-            length = sys.getsizeof(line)-sys.getsizeof(type(line)()) +2
+            length = sys.getsizeof(line) - sys.getsizeof(type(line)()) + 2
             if length <= self.floodBuffer - self._floodCurrentBuffer:
-                ''' buffer isn't full, send '''
+                #  buffer isn't full, send
                 irc.IRCClient.sendLine(self, line)
                 self.updateFloodBuffer(length)
             else:
-                ''' send an invalid command '''
+                # send an invalid command
                 with self._floodLock:
                     self._floodQueue.append(line)
                     if not self._floodWaitInvalid:
@@ -99,11 +99,11 @@ class nautilusBot(irc.IRCClient):
                         self._floodWaitInvalid = True
         else:
             irc.IRCClient.sendLine(self, line)
-                
+
     def updateFloodBuffer(self, length):
         with self._floodLock:
             if time.time() - self._floodLast >= 30:
-                ''' reset flood buffer '''
+                # reset flood buffer
                 self._floodCurrentBuffer = length
             else:
                 self._floodCurrentBuffer += length
@@ -126,6 +126,7 @@ class nautilusBot(irc.IRCClient):
             self.logger.debug(line)
         irc.IRCClient._reallySendLine(self, line)
 
+
 class nautilusBotFactory(protocol.ClientFactory):
     protocol = nautilusBot
     defaultmodules = ['core.users', 'core.perform']
@@ -142,15 +143,16 @@ class nautilusBotFactory(protocol.ClientFactory):
         ch = logging.StreamHandler(sys.stdout)
         ch.setLevel(logging.DEBUG)
         self.logger.addHandler(ch)
-        fh = logging.FileHandler('%s.log' % self.botid, encoding='utf-8')
+        fh = logging.FileHandler('{}.log'.format(self.botid), encoding='utf-8')
         fh.setLevel(logging.WARN)
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        formatter = logging.Formatter(
+            '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         fh.setFormatter(formatter)
         self.logger.addHandler(fh)
 
     def setFromJSON(self):
         with open(self.configfile) as f:
-            j = json.load(f.read())
+            j = json.load(f)
         for b in j['bots']:
             if b['id'] == self.botid:
                 self.nickname = b['nickname']
@@ -186,7 +188,7 @@ class nautilusBotFactory(protocol.ClientFactory):
         for m in mlist:
             loaded = True
             if not m.startswith('core.'):
-                m = 'modules.%s' % m
+                m = 'modules.{}'.format(m)
             try:
                 mo = __import__(m, globals(), locals(), ['MODCLASSES'], -1)
                 for c in mo.MODCLASSES:
@@ -197,7 +199,8 @@ class nautilusBotFactory(protocol.ClientFactory):
             if loaded:
                 self.bot.loaded_modules.append(m)
 
-    def delete_module(self, modname):
+    @staticmethod
+    def delete_module(modname):
         try:
             thismod = sys.modules[modname]
         except KeyError:
@@ -220,12 +223,12 @@ if __name__ == '__main__':
         j = json.load(f.read())
     for b in j['bots']:
         # create factory protocol and application
-        f = nautilusBotFactory(b['id'])
+        factory = nautilusBotFactory(b['id'])
         # connect factory to this host and port
         if b['ssl']:
-            reactor.connectSSL(b['server'], b['port'], f)
+            reactor.connectSSL(b['server'], b['port'], factory)
         else:
-            reactor.connectTCP(b['server'], b['port'], f)
+            reactor.connectTCP(b['server'], b['port'], factory)
 
     # run bot
     reactor.run()
