@@ -217,9 +217,8 @@ class nautilusBotFactory(protocol.ClientFactory):
             self.delete_module(loaded_module)
 
 if __name__ == '__main__':
-    f = open('config.json')
-    j = json.loads(f.read())
-    f.close()
+    with open('config.json') as f:
+        j = json.load(f)
     for b in j['bots']:
         # create factory protocol and application
         f = nautilusBotFactory(b['id'])
