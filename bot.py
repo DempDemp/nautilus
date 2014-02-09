@@ -149,9 +149,8 @@ class nautilusBotFactory(protocol.ClientFactory):
         self.logger.addHandler(fh)
 
     def setFromJSON(self):
-        f = open(self.configfile)
-        j = json.loads(f.read())
-        f.close()
+        with open(self.configfile) as f:
+            j = json.load(f.read())
         for b in j['bots']:
             if b['id'] == self.botid:
                 self.nickname = b['nickname']
@@ -218,7 +217,7 @@ class nautilusBotFactory(protocol.ClientFactory):
 
 if __name__ == '__main__':
     with open('config.json') as f:
-        j = json.load(f)
+        j = json.load(f.read())
     for b in j['bots']:
         # create factory protocol and application
         f = nautilusBotFactory(b['id'])
