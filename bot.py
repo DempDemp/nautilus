@@ -21,7 +21,7 @@ import time
 import sys
 import logging
 from twisted.words.protocols import irc
-from twisted.internet import reactor, protocol
+from twisted.internet import ssl, reactor, protocol
 from twisted.internet.threads import deferToThread
 from core.users import UserAccess
 from threading import Lock
@@ -224,7 +224,7 @@ if __name__ == '__main__':
         factory = nautilusBotFactory(b['id'])
         # connect factory to this host and port
         if b['ssl']:
-            reactor.connectSSL(b['server'], b['port'], factory)
+            reactor.connectSSL(b['server'], b['port'], factory, ssl.CertificateOptions())
         else:
             reactor.connectTCP(b['server'], b['port'], factory)
 
