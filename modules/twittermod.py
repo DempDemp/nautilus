@@ -163,7 +163,7 @@ class twitterClass(botutils.baseClass):
                     if i == 0:
                         self.setLastTweet(u[1], status.id)
                     if status.id > lastId:
-                        self.irc.msg(u[3], 'Twitter @%s: %s' % (u[2], status.text.encode('utf-8')))
+                        self.irc.msg(u[3], 'Twitter @%s: %s' % (u[2], status.text.replace('\n', '').replace('\r', '').encode('utf-8')))
             sleep(self.interval)
 
     def startFollowing(self):
