@@ -41,6 +41,10 @@ class twitterClass(botutils.baseClass):
         self.thread = None
         self.createTables()
         self.setFollow()
+
+    def __del__(self):
+        botutils.baseClass.__del__(self)
+        self.follow = False
         
     def setFollow(self):
         self.api = self.getAPI()

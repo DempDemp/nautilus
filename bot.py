@@ -212,6 +212,9 @@ class nautilusBotFactory(protocol.ClientFactory):
                 pass
 
     def unload_all_modules(self):
+        for class_instance in self.bot.class_instances:
+            # explicitly call __del__ for each class instance in case it's running a thread
+            class_instance.__del__()
         self.bot.class_instances = []
         for loaded_module in self.bot.loaded_modules:
             self.delete_module(loaded_module)
