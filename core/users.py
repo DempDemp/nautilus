@@ -153,7 +153,7 @@ class UserAccess:
                 password TEXT NOT NULL,
                 hostmask TEXT NOT NULL,
                 flags TEXT NOT NULL)''')
-        cur.execute('SELECT COUNT(*) FROM users')
+        cur.execute('SELECT COUNT(*) FROM users WHERE botid=?', (self.irc.id,))
         if not cur.fetchone()[0]:
             cur.execute('INSERT INTO users (botid, username, password, hostmask, flags) VALUES (?, ?, ?, ?, ?)', (self.irc.id,
                     'admin',
