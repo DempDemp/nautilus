@@ -135,7 +135,7 @@ class nautilusBotFactory(protocol.ClientFactory):
         self.configfile = configfile
         self.botid = botid
         self.setFromJSON()
-        self.logger = logging.getLogger('rotter')
+        self.logger = logging.getLogger(self.botid)
         if self.debug:
             self.logger.setLevel(logging.DEBUG)
         else:
