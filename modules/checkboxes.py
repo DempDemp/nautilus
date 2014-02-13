@@ -32,8 +32,7 @@ class checkboxesClass(botutils.baseClass):
 
 	def onPRIVMSG(self, address, target, text):
 		if checkboxes.match(text) != None:
-			trand = truerandomClass()
-			chkbox_rand = trand.truerandom(1, len(text[3:].split('[ ]')), 10, 1)
+			chkbox_rand = truerandomClass.truerandom(1, len(text[3:].split('[ ]')), 10, 1)
 			if 'error' in chkbox_rand or self.isReal(chkbox_rand['result']) == False:
 				chkbox_rand = randint(1, len(text[3:].split('[ ]')))
 			else:

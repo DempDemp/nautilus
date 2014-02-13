@@ -27,7 +27,8 @@ class truerandomClass(botutils.baseClass):
 		except ValueError:
 			return False
 	
-	def truerandom(self, low, high, base = 10, num = 1):
+	@staticmethod
+	def truerandom(low, high, base = 10, num = 1):
 		if low < -1000000000 or high > 1000000000 or high <= low or (base != 2 and base != 8 and base != 10 and base != 16) or num < 1 or num > 10000:
 			return {'error': 'error'}
 		params = {
