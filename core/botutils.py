@@ -25,6 +25,9 @@ class baseClass:
 		self.irc = irc
 		pass
 
+	def __del__(self):
+		pass
+
 	""" following functions handle triggers """
 	def onPRIVMSG(self, address, target, text):
 		pass
