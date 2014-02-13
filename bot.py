@@ -77,7 +77,7 @@ class nautilusBot(irc.IRCClient):
         for instance in self.class_instances:
             deferToThread(instance.onNICK, oldname, newname)
 
-    def sendLine(self, line):
+    def sendLine(self, line, queue=True):
         ''' normal sendLine with flood protection '''
         if type(line) == unicode:
             try:
@@ -88,33 +88,41 @@ class nautilusBot(irc.IRCClient):
             length = sys.getsizeof(line) - sys.getsizeof(type(line)()) + 2
             if length <= self.floodBuffer - self._floodCurrentBuffer:
                 # buffer isn't full, send
-                irc.IRCClient.sendLine(self, line)
                 self.updateFloodBuffer(length)
+                irc.IRCClient.sendLine(self, line)
+                return True
             else:
                 # send an invalid command
-                with self._floodLock:
-                    self._floodQueue.append(line)
-                    if not self._floodWaitInvalid:
-                        irc.IRCClient.sendLine(self, '_!')
-                        self._floodWaitInvalid = True
+                if queue:
+                    with self._floodLock:
+                        self._floodQueue.append(line)
+                if not self._floodWaitInvalid:
+                    irc.IRCClient.sendLine(self, '_!')
+                    self._floodWaitInvalid = True
+                return False
         else:
             irc.IRCClient.sendLine(self, line)
+            return True
 
     def updateFloodBuffer(self, length):
-        with self._floodLock:
-            if time.time() - self._floodLast >= 30:
-                # reset flood buffer
-                self._floodCurrentBuffer = length
-            else:
-                self._floodCurrentBuffer += length
-            self._floodLast = time.time()
+        if time.time() - self._floodLast >= 30:
+            # reset flood buffer
+            self._floodCurrentBuffer = length
+        else:
+            self._floodCurrentBuffer += length
+        self._floodLast = time.time()
 
     def irc_unknown(self, prefix, command, params):
-        with self._floodLock:
-            self._floodCurrentBuffer = 0
-            self._floodWaitInvalid = False
-            while self._floodQueue:
-                self.sendLine(self._floodQueue.pop(0))
+        if command == 'ERR_UNKNOWNCOMMAND':
+            with self._floodLock:
+                self._floodCurrentBuffer = 0
+                self._floodWaitInvalid = False
+                while self._floodQueue:
+                    line = self._floodQueue[0]
+                    if self.sendLine(line, queue=False):
+                        self._floodQueue.pop(0)
+                    else:
+                        break
 
     def lineReceived(self, line):
         if self.factory.debug:
