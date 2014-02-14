@@ -20,6 +20,7 @@ import re
 from core import botutils
 from truerandom import truerandomClass
 from random import randint
+
 checkboxes = re.compile('^(\[ \] .+ )+(\[ \] .+)')
 
 class checkboxesClass(botutils.baseClass):
