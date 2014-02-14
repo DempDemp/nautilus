@@ -105,7 +105,7 @@ class nautilusBot(irc.IRCClient):
             return True
 
     def updateFloodBuffer(self, length):
-        if time.time() - self._floodLast >= 30:
+        if time.time() - self._floodLast >= 90:
             # reset flood buffer
             self._floodCurrentBuffer = length
         else:
@@ -137,7 +137,7 @@ class nautilusBot(irc.IRCClient):
 
 class nautilusBotFactory(protocol.ClientFactory):
     protocol = nautilusBot
-    defaultmodules = ['core.users', 'core.perform']
+    defaultmodules = ['core.users', 'core.perform', 'core.botutils']
 
     def __init__(self, botid, configfile='config.json'):
         self.configfile = configfile
@@ -175,8 +175,7 @@ class nautilusBotFactory(protocol.ClientFactory):
         self.bot.factory = self
         self.bot.setParamsFromFactory()
         self.bot.users = UserAccess(self.bot)
-        if len(self.bot.loaded_modules):
-            self.unload_all_modules()
+        self.unload_all_modules()
         self.initialize_modules()
         return self.bot
 
@@ -227,17 +226,20 @@ class nautilusBotFactory(protocol.ClientFactory):
         for loaded_module in self.bot.loaded_modules:
             self.delete_module(loaded_module)
 
+
 if __name__ == '__main__':
     with open('config.json') as f:
         j = json.load(f)
+    factories = []
     for b in j['bots']:
         # create factory protocol and application
-        factory = nautilusBotFactory(b['id'])
+        botFactory = nautilusBotFactory(b['id'])
+        factories.append(botFactory)
         # connect factory to this host and port
         if b['ssl']:
-            reactor.connectSSL(b['server'], b['port'], factory, ssl.CertificateOptions())
+            reactor.connectSSL(b['server'], b['port'], botFactory, ssl.CertificateOptions())
         else:
-            reactor.connectTCP(b['server'], b['port'], factory)
+            reactor.connectTCP(b['server'], b['port'], botFactory)
 
     # run bot
     reactor.run()
