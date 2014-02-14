@@ -40,23 +40,6 @@ class usersClass(botutils.baseClass):
                     else:
                         self.irc.users.setHostmask(userdata[0], address)
                         self.irc.notice(address.split('!')[0], 'Successfully logged in. User flags: %s' % userdata[1])
-            elif text.startswith('rehash'):
-                ''' doesn't really belong here '''
-                flags = self.irc.users.getFlags(hostmask=address)
-                if flags is None or 'n' not in flags[1]:
-                    self.irc.notice(address.split('!')[0], 'Insufficient privileges')
-                    return
-                self.irc.factory.setFromJSON()
-                self.irc.factory.unload_all_modules()
-                self.irc.factory.initialize_modules()
-                self.irc.notice(address.split('!')[0], 'Done')
-            elif text.startswith('sendline'):
-                ''' doesn't really belong here either, should move to botutils '''
-                flags = self.irc.users.getFlags(hostmask=address)
-                if flags is None or 'n' not in flags[1]:
-                    self.irc.notice(address.split('!')[0], 'Insufficient privileges')
-                    return
-                self.irc.sendLine(' '.join(text.split(' ')[1:]))
             elif text.startswith('users'):
                 params = text.split(' ')
                 if params[0] != 'users':
@@ -69,7 +52,7 @@ class usersClass(botutils.baseClass):
                     self.irc.notice(address.split('!')[0], 'Available commands: whoami changepass add delete list setflags')
                     return
                 if params[1] == 'whoami':
-                    userdate = self.irc.users.getFlags(hostmask=address)
+                    userdata = self.irc.users.getFlags(hostmask=address)
                     self.irc.notice(address.split('!')[0], 'Username: %s, flags: %s' % userdata)
                 elif params[1] == 'changepass':
                     if len(params) < 4:

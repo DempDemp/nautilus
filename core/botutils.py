@@ -20,38 +20,63 @@ import re
 prefix = re.compile("^[\`\~\!\@\#\$\%\^\&\*\(\)\_\-\+\=\[\]\;\:\'\"\\\|\,\<\.\>\/\?]") # bot commands prefix
 
 class baseClass:
-	""" base class for modules """
-	def __init__(self, irc):
-		self.irc = irc
-		pass
+    """ base class for modules """
+    def __init__(self, irc):
+        self.irc = irc
+        pass
 
-	def __del__(self):
-		pass
+    def __del__(self):
+        pass
 
-	""" following functions handle triggers """
-	def onPRIVMSG(self, address, target, text):
-		pass
+    """ following functions handle triggers """
+    def onPRIVMSG(self, address, target, text):
+        pass
 
-	def onNOTICE(self, address, target, text):
-		pass
+    def onNOTICE(self, address, target, text):
+        pass
 
-	def onJOIN(self, address, target):
-		pass
+    def onJOIN(self, address, target):
+        pass
 
-	def onPART(self, address, target, text):
-		pass
+    def onPART(self, address, target, text):
+        pass
 
-	def onQUIT(self, address, text):
-		pass
+    def onQUIT(self, address, text):
+        pass
 
-	def onNICK(self, address, newnick):
-		pass
+    def onNICK(self, address, newnick):
+        pass
 
-	def onINVITE(self, address, nickname, channel):
-		pass
+    def onINVITE(self, address, nickname, channel):
+        pass
 
-	def onSIGNEDON(self):
-		pass
+    def onSIGNEDON(self):
+        pass
 
-	def onRAW(self, line):
-		pass
+    def onRAW(self, line):
+        pass
+
+
+class utilsClass(baseClass):
+
+    def onPRIVMSG(self, address, target, text):
+        if target == self.irc.nickname:
+            if text.startswith('rehash'):
+                flags = self.irc.users.getFlags(hostmask=address)
+                if flags is None or 'n' not in flags[1]:
+                    self.irc.notice(address.split('!')[0], 'Insufficient privileges')
+                    self.irc.logger.warning('Unauthorised rehash attempt from %s', address)
+                    return
+                self.irc.factory.setFromJSON()
+                self.irc.factory.unload_all_modules()
+                self.irc.factory.initialize_modules()
+                self.irc.notice(address.split('!')[0], 'Done')
+            elif text.startswith('sendline'):
+                flags = self.irc.users.getFlags(hostmask=address)
+                if flags is None or 'n' not in flags[1]:
+                    self.irc.notice(address.split('!')[0], 'Insufficient privileges')
+                    self.irc.logger.warning('Unauthorised sendline attempt from %s', address)
+                    return
+                self.irc.sendLine(' '.join(text.split(' ')[1:]))
+
+MODCLASSES = [utilsClass]
