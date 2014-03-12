@@ -33,7 +33,8 @@ webre = [
     re.compile('((http(s)?://)?www\.globes\.co\.il\/(news\/article\.aspx|serveen\/globes\/docview\.asp)\?did=\d+)'),
     re.compile('((http(s)?://)?[a-zA-Z\-]+\.nana10\.co\.il/Article/\?ArticleID\=\d+)'),
     re.compile('((http(s)?://)?(www\.)?the7eye\.org\.il/\d+)'),
-    re.compile('((http(s)?://)?imgur\.com\/gallery\/\w+)')
+    re.compile('((http(s)?://)?imgur\.com\/gallery\/\w+)'),
+    re.compile('((http(s)?://)?(www\.)?bbc\.co(\.uk|m)\/news\/[\w\-]+)')
 ]
 titleregex = re.compile('<title(?:[a-zA-Z\= \'\"]*)>(.*)</title>', re.DOTALL | re.MULTILINE | re.IGNORECASE)
 charsetregex = re.compile('charset=([\w\-]+)', re.DOTALL | re.MULTILINE | re.IGNORECASE)
