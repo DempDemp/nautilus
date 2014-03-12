@@ -139,7 +139,8 @@ class nautilusBotFactory(protocol.ClientFactory):
     protocol = nautilusBot
     defaultmodules = ['core.users', 'core.perform', 'core.botutils']
 
-    def __init__(self, botid, configfile='config.json'):
+    def __init__(self, botid, factories, configfile='config.json'):
+        self.factories = factories
         self.configfile = configfile
         self.botid = botid
         self.setFromJSON()
@@ -175,7 +176,7 @@ class nautilusBotFactory(protocol.ClientFactory):
         self.bot.factory = self
         self.bot.setParamsFromFactory()
         self.bot.users = UserAccess(self.bot)
-        self.unload_all_modules()
+        self.reload_all_modules()
         self.initialize_modules()
         return self.bot
 
@@ -197,34 +198,26 @@ class nautilusBotFactory(protocol.ClientFactory):
                 m = 'modules.%s' % m
             try:
                 mo = __import__(m, globals(), locals(), ['MODCLASSES'], -1)
+                reload(mo)
                 for c in mo.MODCLASSES:
                     ci = c(self.bot)
                     self.bot.class_instances.append(ci)
             except ImportError as e:
                 loaded = False # could not load module
             if loaded:
-                self.bot.loaded_modules.append(m)
+                self.bot.loaded_modules.append(mo)
 
-    def delete_module(self, modname):
-        try:
-            thismod = sys.modules[modname]
-        except KeyError:
-            raise ValueError(modname)
-        these_symbols = dir(thismod)
-        del sys.modules[modname]
-        for mod in sys.modules.values():
-            try:
-                delattr(mod, modname)
-            except AttributeError:
-                pass
-
-    def unload_all_modules(self):
+    def reload_all_modules(self):
         for class_instance in self.bot.class_instances:
             # explicitly call __del__ for each class instance in case it's running a thread
             class_instance.__del__()
         self.bot.class_instances = []
-        for loaded_module in self.bot.loaded_modules:
-            self.delete_module(loaded_module)
+
+    def reload_modules(self):
+        for factory in self.factories:
+            factory.reload_all_modules()
+        for factory in self.factories:
+            factory.initialize_modules()
 
 
 if __name__ == '__main__':
@@ -233,7 +226,7 @@ if __name__ == '__main__':
     factories = []
     for b in j['bots']:
         # create factory protocol and application
-        botFactory = nautilusBotFactory(b['id'])
+        botFactory = nautilusBotFactory(b['id'], factories)
         factories.append(botFactory)
         # connect factory to this host and port
         if b['ssl']:

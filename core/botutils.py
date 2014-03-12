@@ -68,8 +68,7 @@ class utilsClass(baseClass):
                     self.irc.logger.warning('Unauthorised rehash attempt from %s', address)
                     return
                 self.irc.factory.setFromJSON()
-                self.irc.factory.unload_all_modules()
-                self.irc.factory.initialize_modules()
+                self.irc.factory.reload_modules()
                 self.irc.notice(address.split('!')[0], 'Done')
             elif text.startswith('sendline'):
                 flags = self.irc.users.getFlags(hostmask=address)
