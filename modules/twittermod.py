@@ -25,13 +25,13 @@ from threading import Thread
 class twitterClass(botutils.baseClass):
     '''
     To setup an account:
-        twitter set CONSUMER_KEY <key>
-        twitter set CONSUMER_SECRET <key>
-        twitter set ACCESS_TOKEN_KEY <key>
-        twitter set ACCESS_TOKEN_SECRET <key>
+        twitter set TWITTER_CONSUMER_KEY <key>
+        twitter set TWITTER_CONSUMER_SECRET <key>
+        twitter set TWITTER_ACCESS_TOKEN_KEY <key>
+        twitter set TWITTER_ACCESS_TOKEN_SECRET <key>
 
     Set interval:
-        twitter set INTERVAL <seconds>
+        twitter set TWITTER_INTERVAL <seconds>
 
     User flag required: t
     '''
@@ -43,7 +43,7 @@ class twitterClass(botutils.baseClass):
         self.setFollow()
 
     def __del__(self):
-        botutils.baseClass.__del__(self)
+        super(twitterClass, self).__del__()
         self.follow = False
         
     def setFollow(self):
@@ -56,10 +56,6 @@ class twitterClass(botutils.baseClass):
 
     def createTables(self):
         cur = self.conn.cursor()
-        cur.execute('''CREATE TABLE IF NOT EXISTS twitterSettings (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                botid TEXT NOT NULL,
-                setting TEXT NOT NULL UNIQUE,
-                sval TEXT NOT NULL)''')
         cur.execute('''CREATE TABLE IF NOT EXISTS twitterFollow (id INTEGER PRIMARY KEY AUTOINCREMENT,
                 botid TEXT NOT NULL,
                 userid TEXT NOT NULL,
@@ -71,19 +67,15 @@ class twitterClass(botutils.baseClass):
 
     def getAPI(self):
         cur = self.conn.cursor()
-        cur.execute('''SELECT setting, sval FROM twitterSettings WHERE botid=? AND (setting='CONSUMER_KEY'
-                OR setting='CONSUMER_SECRET'
-                OR setting='ACCESS_TOKEN_KEY'
-                OR setting='ACCESS_TOKEN_SECRET')
-                ''', (self.irc.id,))
+        cur.execute('SELECT setting, sval FROM botSettings WHERE botid=? AND setting LIKE ?', (self.irc.id, 'TWITTER_%'))
         res = cur.fetchall()
         cur.close()
         if len(res) == 4:
             try:
-                apio = Api(consumer_key=filter(lambda x: x[0] == 'CONSUMER_KEY', res)[0][1],
-                    consumer_secret=filter(lambda x: x[0] == 'CONSUMER_SECRET', res)[0][1],
-                    access_token_key=filter(lambda x: x[0] == 'ACCESS_TOKEN_KEY', res)[0][1],
-                    access_token_secret=filter(lambda x: x[0] == 'ACCESS_TOKEN_SECRET', res)[0][1])
+                apio = Api(consumer_key=filter(lambda x: x[0] == 'TWITTER_CONSUMER_KEY', res)[0][1],
+                    consumer_secret=filter(lambda x: x[0] == 'TWITTER_CONSUMER_SECRET', res)[0][1],
+                    access_token_key=filter(lambda x: x[0] == 'TWITTER_ACCESS_TOKEN_KEY', res)[0][1],
+                    access_token_secret=filter(lambda x: x[0] == 'TWITTER_ACCESS_TOKEN_SECRET', res)[0][1])
                 return apio
             except TwitterError as e:
                 self.irc.logger.error('Twitter error: %s' % e.message)
@@ -99,7 +91,7 @@ class twitterClass(botutils.baseClass):
 
     def getInterval(self):
         cur = self.conn.cursor()
-        cur.execute("SELECT sval FROM twitterSettings WHERE botid=? AND setting='INTERVAL'", (self.irc.id,))
+        cur.execute("SELECT sval FROM botSettings WHERE botid=? AND setting='TWITTER_INTERVAL'", (self.irc.id,))
         res = cur.fetchone()
         cur.close()
         if res is None:
@@ -109,13 +101,15 @@ class twitterClass(botutils.baseClass):
 
     def setVar(self, setting, sval):
         cur = self.conn.cursor()
-        cur.execute('INSERT OR REPLACE INTO twitterSettings (botid, setting, sval) VALUES (?, ?, ?)', (self.irc.id, setting, sval))
+        if not settings.startswith('TWITTER_'):
+            setting = 'TWITTER_%s' % setting
+        cur.execute('INSERT OR REPLACE INTO botSettings (botid, setting, sval) VALUES (?, ?, ?)', (self.irc.id, setting, sval))
         self.conn.commit()
         cur.close()
 
     def delSetting(self, sid):
         cur = self.conn.cursor()
-        cur.execute('DELETE FROM twitterSettings WHERE botid=? AND id=?', (self.irc.id, sid))
+        cur.execute('DELETE FROM botSettings WHERE botid=? AND id=? AND setting LIKE ?', (self.irc.id, sid, 'TWITTER_%'))
         res = cur.rowcount
         self.conn.commit()
         cur.close()
@@ -125,7 +119,7 @@ class twitterClass(botutils.baseClass):
 
     def getSettings(self):
         cur = self.conn.cursor()
-        cur.execute('SELECT id, setting, sval FROM twitterSettings WHERE botid=?', (self.irc.id,))
+        cur.execute('SELECT id, setting, sval FROM botSettings WHERE botid=? AND setting LIKE ?', (self.irc.id, 'TWITTER_%'))
         res = cur.fetchall()
         cur.close()
         return res
