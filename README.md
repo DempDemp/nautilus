@@ -43,4 +43,4 @@ Included modules:
 
 ```truerandom``` Fetches true random numbers from random.org.
 
-And more.
+And more. Writing modules is *very* easy. Just take a look at any of the included modules.
