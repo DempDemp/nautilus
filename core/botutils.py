@@ -17,9 +17,10 @@ along with nautilus. If not, see <http://www.gnu.org/licenses/>.
 '''
 
 import re
+import sqlite3
 prefix = re.compile("^[\`\~\!\@\#\$\%\^\&\*\(\)\_\-\+\=\[\]\;\:\'\"\\\|\,\<\.\>\/\?]") # bot commands prefix
 
-class baseClass:
+class baseClass(object):
     """ base class for modules """
     def __init__(self, irc):
         self.irc = irc
@@ -58,6 +59,21 @@ class baseClass:
 
 
 class utilsClass(baseClass):
+
+    def __init__(self, irc):
+        baseClass.__init__(self, irc)
+        self.createTables()
+
+    def createTables(self):
+        conn = sqlite3.connect(self.irc.users.dbfile, check_same_thread=False)
+        cur = conn.cursor()
+        cur.execute('''CREATE TABLE IF NOT EXISTS botSettings (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                botid TEXT NOT NULL,
+                setting TEXT NOT NULL UNIQUE,
+                sval TEXT NOT NULL)''')
+        conn.commit()
+        cur.close()
+        conn.close()
 
     def onPRIVMSG(self, address, target, text):
         if target == self.irc.nickname:
