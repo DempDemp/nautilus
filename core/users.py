@@ -82,7 +82,7 @@ class usersClass(botutils.baseClass):
                         self.irc.notice(address.split('!')[0], 'Usage: users add <username> <password> <flags>')
                     else:
                         try:
-                            self.irc.users.addUser(params[1], params[2], params[3])
+                            self.irc.users.addUser(params[2], params[3], params[4])
                             self.irc.notice(address.split('!')[0], 'Done')
                         except ValueError as e:
                             self.irc.notice(address.split('!')[0], e.message)
