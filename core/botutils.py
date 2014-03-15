@@ -39,7 +39,7 @@ class baseClass(object):
     def onJOIN(self, address, target):
         pass
 
-    def onPART(self, address, target, text):
+    def onPART(self, address, target):
         pass
 
     def onQUIT(self, address, text):
