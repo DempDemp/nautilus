@@ -16,7 +16,9 @@ You should have received a copy of the GNU Affero General Public License
 along with nautilus. If not, see <http://www.gnu.org/licenses/>.
 '''
 
-import urllib, urllib2, re
+import urllib
+import urllib2
+import re
 from core import botutils
 from urlparse import urlparse
 from BeautifulSoup import BeautifulSoup
@@ -34,10 +36,13 @@ webre = [
     re.compile('((http(s)?://)?[a-zA-Z\-]+\.nana10\.co\.il/Article/\?ArticleID\=\d+)'),
     re.compile('((http(s)?://)?(www\.)?the7eye\.org\.il/\d+)'),
     re.compile('((http(s)?://)?imgur\.com\/gallery\/\w+)'),
-    re.compile('((http(s)?://)?(www\.)?bbc\.co(\.uk|m)\/news\/[\w\-]+)')
+    re.compile('((http(s)?://)?(www\.)?bbc\.co(\.uk|m)\/news\/[\w\-]+)'),
+    re.compile('((http(s)?://)?(www\.)?reuters\.co(\.uk|m)\/article\/[\w\-\/]+)')
 ]
+
 titleregex = re.compile('<title(?:[a-zA-Z\= \'\"]*)>(.*)</title>', re.DOTALL | re.MULTILINE | re.IGNORECASE)
 charsetregex = re.compile('charset=([\w\-]+)', re.DOTALL | re.MULTILINE | re.IGNORECASE)
+
 
 class titleClass(botutils.baseClass):
     def purify(self, s):
@@ -51,7 +56,7 @@ class titleClass(botutils.baseClass):
             return {'error': 'error'}
         host = urlparse(url)
         host = host.netloc
-        req  = urllib2.Request(url)
+        req = urllib2.Request(url)
         try:
             response = urllib2.urlopen(req)
         except urllib2.HTTPError, e:
@@ -83,7 +88,7 @@ class titleClass(botutils.baseClass):
         if 'http' in text:
             for tre in webre:
                 titlesearch = tre.search(text)
-                if titlesearch != None:
+                if titlesearch is not None:
                     link = titlesearch.group(1)
                     result = self.getTitle(link)
                     if not 'error' in result:
