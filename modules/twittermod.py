@@ -37,10 +37,12 @@ class twitterClass(botutils.baseClass):
     '''
     def __init__(self, irc):
         botutils.baseClass.__init__(self, irc)
+        self.irc.logger.warning('Twitter module loaded.')
         self.conn = sqlite3.connect(self.irc.users.dbfile, check_same_thread=False)
         self.thread = None
         self.createTables()
         self.setFollow()
+        self.startFollowing()
 
     def __del__(self):
         super(twitterClass, self).__del__()
@@ -53,6 +55,11 @@ class twitterClass(botutils.baseClass):
             self.follow = True
         else:
             self.follow = False
+        self.irc.logger.info('Twitter following: %s. Interval: %s; API: %s; Following: %s.',
+                             self.follow,
+                             self.interval,
+                             self.api,
+                             len(self.getFollowing()))
 
     def createTables(self):
         cur = self.conn.cursor()
@@ -68,18 +75,18 @@ class twitterClass(botutils.baseClass):
     def getAPI(self):
         cur = self.conn.cursor()
         cur.execute('SELECT setting, sval FROM botSettings WHERE botid=? AND setting LIKE ?', (self.irc.id, 'TWITTER_%'))
-        res = cur.fetchall()
+        res = dict(cur.fetchall())
         cur.close()
-        if len(res) == 4:
-            try:
-                apio = Api(consumer_key=filter(lambda x: x[0] == 'TWITTER_CONSUMER_KEY', res)[0][1],
-                    consumer_secret=filter(lambda x: x[0] == 'TWITTER_CONSUMER_SECRET', res)[0][1],
-                    access_token_key=filter(lambda x: x[0] == 'TWITTER_ACCESS_TOKEN_KEY', res)[0][1],
-                    access_token_secret=filter(lambda x: x[0] == 'TWITTER_ACCESS_TOKEN_SECRET', res)[0][1])
-                return apio
-            except TwitterError as e:
-                self.irc.logger.error('Twitter error: %s' % e.message)
-                return False
+        try:
+            apio = Api(consumer_key=res['TWITTER_CONSUMER_KEY'],
+                consumer_secret=res['TWITTER_CONSUMER_SECRET'],
+                access_token_key=res['TWITTER_ACCESS_TOKEN_KEY'],
+                access_token_secret=res['TWITTER_ACCESS_TOKEN_SECRET'])
+            self.irc.logger.info('Twitter API object created.')
+            return apio
+        except (KeyError, TwitterError) as e:
+            self.irc.logger.error('Twitter error: %s' % e.message)
+            return False
         return False
 
     def getFollowing(self):
