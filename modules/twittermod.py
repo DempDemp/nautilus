@@ -101,7 +101,7 @@ class twitterClass(botutils.baseClass):
 
     def setVar(self, setting, sval):
         cur = self.conn.cursor()
-        if not settings.startswith('TWITTER_'):
+        if not setting.startswith('TWITTER_'):
             setting = 'TWITTER_%s' % setting
         cur.execute('INSERT OR REPLACE INTO botSettings (botid, setting, sval) VALUES (?, ?, ?)', (self.irc.id, setting, sval))
         self.conn.commit()
