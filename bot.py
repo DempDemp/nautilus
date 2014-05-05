@@ -145,18 +145,18 @@ class nautilusBotFactory(protocol.ClientFactory):
         self.botid = botid
         self.setFromJSON()
         self.logger = logging.getLogger(self.botid)
-        if self.debug:
-            self.logger.setLevel(logging.DEBUG)
-        else:
-            self.logger.setLevel(logging.WARN)
         ch = logging.StreamHandler(sys.stdout)
         ch.setLevel(logging.DEBUG)
         self.logger.addHandler(ch)
         fh = logging.FileHandler('%s.log' % self.botid, encoding='utf-8')
-        fh.setLevel(logging.WARN)
+        fh.setLevel(logging.INFO)
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         fh.setFormatter(formatter)
         self.logger.addHandler(fh)
+        if self.debug:
+            self.logger.setLevel(logging.DEBUG)
+        else:
+            self.logger.setLevel(logging.INFO)
 
     def setFromJSON(self):
         with open(self.configfile) as f:
