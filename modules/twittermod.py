@@ -252,7 +252,7 @@ class twitterClass(botutils.baseClass):
                 tweetid = text.split(' ')[1]
                 tweet_address = self.getTweetAddress(tweetid)
                 flags = self.irc.users.getFlags(hostmask=address)
-                if tweet_address or 't' in flags[1]:
+                if tweet_address or flags is not None and 't' in flags[1]:
                     if tweet_address and tweet_address.split('!')[1] == address.split('!')[1] or flags is not None and 't' in flags[1]:
                         r = self.deleteTweet(tweetid)
                         self.irc.msg(target, r)
