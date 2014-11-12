@@ -17,6 +17,7 @@ along with nautilus. If not, see <http://www.gnu.org/licenses/>.
 '''
 
 import re, urllib, urllib2
+import datetime
 from core import botutils
 from BeautifulSoup import BeautifulSoup
 
@@ -28,6 +29,12 @@ class youtubeClass(botutils.baseClass):
 			return str(BeautifulSoup(s.replace('\n', '').replace('\r', ''), convertEntities=BeautifulSoup.HTML_ENTITIES))
 		else:
 			return s
+
+	def timestring(self, seconds):
+		s = str(datetime.timedelta(seconds=seconds))
+		if s.partition(':')[0] == '0':
+			return s[2:]
+		return s
 
 	def intWithCommas(self, x):
 		if type(x) not in [type(0), type(0L)]:
@@ -54,17 +61,19 @@ class youtubeClass(botutils.baseClass):
 		soup = BeautifulSoup(data)
 		title = self.purify(soup.find("title").find(text=True))
 		views = self.purify(soup.find("yt:statistics")['viewcount'])
+		seconds = int(soup.find("yt:duration")['seconds'])
+		time = self.timestring(seconds)
 		try:
 			views = self.intWithCommas(int(views))
 		except ValueError:
 			views = "-"
-		return {"video": video, "title": title, "views": views}
+		return {"video": video, "title": title, "views": views, "time": time}
 
 	def privmsg_format(self, result):
 		if "error" in result:
 			msg = "[YouTube] an error occurred"
 		else:
-			msg = "[YouTube] Title: " + chr(2) + result['title'] + chr(2) + ". Views: " + chr(2) + result['views'] + chr(2)
+			msg = "[YouTube] Title: " + chr(2) + result['title'] + chr(2) + ". Views: " + chr(2) + result['views'] + chr(2) + ". Duration: " + chr(2) + result['time'] + chr(2)
 		return msg.split("\n")[0].encode('utf-8')
 	
 	def onPRIVMSG(self, address, target, text):
