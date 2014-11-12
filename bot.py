@@ -191,12 +191,14 @@ class nautilusBotFactory(protocol.ClientFactory):
 
     def initialize_modules(self):
         self.bot.loaded_modules = []
+        self.logger.info('Loading modules')
         mlist = self.defaultmodules + self.modules
         for m in mlist:
             loaded = True
             if not m.startswith('core.'):
                 m = 'modules.%s' % m
             try:
+                self.logger.info('Loading {}'.format(m))
                 mo = __import__(m, globals(), locals(), ['MODCLASSES'], -1)
                 reload(mo)
                 for c in mo.MODCLASSES:
@@ -204,6 +206,7 @@ class nautilusBotFactory(protocol.ClientFactory):
                     self.bot.class_instances.append(ci)
             except ImportError as e:
                 loaded = False # could not load module
+                self.logger.warn('Unable to load {}. {}'.format(m, e))
             if loaded:
                 self.bot.loaded_modules.append(mo)
 
