@@ -18,34 +18,60 @@ along with nautilus. If not, see <http://www.gnu.org/licenses/>.
 
 import urllib
 import urllib2
+import sqlite3
 import re
 from core import botutils
 from urlparse import urlparse
 from BeautifulSoup import BeautifulSoup
 
-webre = [
-    re.compile('((http(s)?://)?www\.(m)?ynet\.co\.il/articles/0,7340,L-\d+,00.html)'),
-    re.compile('((http(s)?://)?www\.calcalist\.co\.il/\w+/\w+/0,7340,L-\d+,00.html)'),
-    re.compile('((http(s)?://)?www\.amazon\.com(?:/dp/|/gp/product/)(?:[A-Z0-9]){10})'),
-    re.compile('((http(s)?://)?rotter\.net\/forum\/scoops1\/(\d)+\.shtml)'),
-    re.compile('((http(s)?://)?www\.nrg\.co\.il/online/\d+/\w+/\d+/\d+.html)'),
-    re.compile('((http(s)?://)?www\.themarker\.com/\w+/\d\.\d+)'),
-    re.compile('((http(s)?:\/\/)?[\w\-]+\.walla\.co\.il\/((\?w\=(\/|\%2F)\d+(\/|\%2F)\d+)|item\/\d+))'),
-    re.compile('((http(s)?://)?www\.haaretz\.co(\.il|m)/(([\w-]+/)+(\.premium-)?)?\d\.\d+)'),
-    re.compile('((http(s)?://)?www\.globes\.co\.il\/(news\/article\.aspx|serveen\/globes\/docview\.asp)\?did=\d+)'),
-    re.compile('((http(s)?://)?[a-zA-Z\-]+\.nana10\.co\.il/Article/\?ArticleID\=\d+)'),
-    re.compile('((http(s)?://)?(www\.)?the7eye\.org\.il/\d+)'),
-    re.compile('((http(s)?://)?imgur\.com\/gallery\/\w+)'),
-    re.compile('((http(s)?://)?(www\.)?bbc\.co(\.uk|m)\/news\/[\w\-]+)'),
-    re.compile('((http(s)?://)?(www\.)?reuters\.co(\.uk|m)\/article\/[\w\-\/]+)'),
-    re.compile('((http(s)?://)?(www\.)?twitter\.com\/[\w\-]+\/status\/\d+)')
-]
-
-titleregex = re.compile('<title(?:[a-zA-Z\= \'\"]*)>(.*)</title>', re.DOTALL | re.MULTILINE | re.IGNORECASE)
+titleregex = re.compile('<title(?:[a-zA-Z\= \'\"]*)>([^<]*)</title>', re.DOTALL | re.MULTILINE | re.IGNORECASE)
 charsetregex = re.compile('charset=([\w\-]+)', re.DOTALL | re.MULTILINE | re.IGNORECASE)
 
 
 class titleClass(botutils.baseClass):
+    def __init__(self, irc):
+        botutils.baseClass.__init__(self, irc)
+        self.conn = sqlite3.connect(self.irc.users.dbfile, check_same_thread=False)
+        self.createTables()
+        self.regexes = []
+        self.setRegexes()
+
+    def createTables(self):
+        cur = self.conn.cursor()
+        cur.execute('''CREATE TABLE IF NOT EXISTS title_regex (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                botid TEXT NOT NULL,
+                regex TEXT NOT NULL)''')
+        self.conn.commit()
+        cur.close()
+
+    def getRegexes(self):
+        cur = self.conn.cursor()
+        cur.execute('SELECT id, regex FROM title_regex WHERE botid=?', (self.irc.id,))
+        res = cur.fetchall()
+        cur.close()
+        return res
+
+    def addRegex(self, regex):
+        cur = self.conn.cursor()
+        cur.execute('INSERT INTO title_regex (botid, regex) VALUES (?, ?)', (self.irc.id, regex))
+        self.conn.commit()
+        cur.close()
+
+    def delRegex(self, rid):
+        cur = self.conn.cursor()
+        cur.execute('DELETE FROM title_regex WHERE botid=? AND id=?', (self.irc.id, rid))
+        res = cur.rowcount
+        self.conn.commit()
+        cur.close()
+        if res:
+            return True
+        return False
+
+    def setRegexes(self):
+        regexes = self.getRegexes()
+        for rid, regex in regexes:
+            self.regexes.append(re.compile(regex))
+
     def purify(self, s):
         if isinstance(s, str) or isinstance(s, unicode):
             return unicode(BeautifulSoup(s.replace("\n", '').replace("\r", '').replace("\t", ''), convertEntities=BeautifulSoup.HTML_ENTITIES))
@@ -86,14 +112,45 @@ class titleClass(botutils.baseClass):
         return msg
 
     def onPRIVMSG(self, address, target, text):
-        if 'http' in text:
-            for tre in webre:
-                titlesearch = tre.search(text)
+        if target[0] == '#' and 'http' in text:
+            for regex in self.regexes:
+                titlesearch = regex.search(text)
                 if titlesearch is not None:
                     link = titlesearch.group(1)
                     result = self.getTitle(link)
                     if not 'error' in result:
                         self.irc.msg(target, self.privmsg_format(result))
                     break
+        elif target == self.irc.nickname and text.startswith('titles'):
+            params = text.split(' ')
+            if params[0] != 'titles':
+                return
+            flags = self.irc.users.getFlags(hostmask=address)
+            if flags is None or 'w' not in flags[1]:
+                self.irc.notice(address.split('!')[0], 'Insufficient privileges')
+                return
+            if len(params) == 1:
+                self.irc.notice(address.split('!')[0], 'Available commands: add del list')
+                return
+            elif params[1] == 'add':
+                if len(params) != 3:
+                    self.irc.notice(address.split('!')[0], 'Usage: titles add <regex>')
+                else:
+                    self.addRegex(' '.join(params[2:]))
+                    self.irc.notice(address.split('!')[0], 'Done')
+                    self.setRegexes()
+            elif params[1] == 'del':
+                if len(params) != 3:
+                    self.irc.notice(address.split('!')[0], 'Usage: twitter del <id>')
+                else:
+                    if self.delRegex(params[2]):
+                        self.irc.notice(address.split('!')[0], 'Done')
+                    else:
+                        self.irc.notice(address.split('!')[0], 'Unable to delete regex')
+            elif params[1] == 'list':
+                regexes = self.getRegexes()
+                self.irc.notice(address.split('!')[0], 'id regex')
+                for x in regexes:
+                    self.irc.notice(address.split('!')[0], '%s %s' % x)
 
 MODCLASSES = [titleClass]
