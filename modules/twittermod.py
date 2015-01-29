@@ -41,17 +41,20 @@ class twitterClass(botutils.baseClass):
         self.irc.logger.warning('Twitter module loaded.')
         self.conn = sqlite3.connect(self.irc.users.dbfile, check_same_thread=False)
         self.thread = None
+        self.thread_mentions = None
         self.createTables()
+        self.interval = self.getInterval()
         self.api = self.getAPI()
         self.setFollow()
         self.startFollowing()
+        self.startFollowingMentions()
         self.tweet_channel = self.getTweetChannel() or ''
 
     def __del__(self):
         self.follow = False
+        self.api = None
         
     def setFollow(self):
-        self.interval = self.getInterval()
         if self.api and len(self.getFollowing()) and self.interval:
             self.follow = True
         else:
@@ -107,7 +110,7 @@ class twitterClass(botutils.baseClass):
         res = cur.fetchone()
         cur.close()
         if res is None:
-            return False
+            return 600
         else:
             return int(res[0])
 
@@ -172,6 +175,16 @@ class twitterClass(botutils.baseClass):
             return True
         return False
 
+    def getLastMentionId(self):
+        cur = self.conn.cursor()
+        cur.execute('SELECT sval FROM botSettings WHERE botid=? AND setting=?', (self.irc.id, 'TWITTER_LAST_MENTION_ID'))
+        res = cur.fetchone()
+        cur.close()
+        if res:
+            return res[0]
+        else:
+            return None
+
     def startFollowingThread(self):
         while self.follow:
             self.irc.logger.info('Checking for new tweets')
@@ -188,6 +201,20 @@ class twitterClass(botutils.baseClass):
                         self.setLastTweet(u[1], status.id)
                     if status.id > lastId:
                         self.irc.msg(u[3], 'Twitter @%s: %s' % (u[2], status.text.replace('\n', '').replace('\r', '').encode('utf-8')))
+            self.interval = self.getInterval()
+            sleep(self.interval)
+
+    def startFollowMentionsThread(self):
+        while self.api and self.tweet_channel:
+            self.irc.logger.info('Checking for new mentions')
+            lastId = self.getLastMentionId()
+            statuses = self.api.GetMentions(since_id=lastId, count=5)
+            for i, status in enumerate(statuses):
+                self.irc.logger.info('New mention: %s', status.id)
+                if i == 0:
+                    self.setVar('TWITTER_LAST_MENTION_ID', status.id)
+                self.irc.msg(self.tweet_channel, 'Twitter @%s: %s' % (status.user.screen_name, status.text.replace('\n', '').replace('\r', '').encode('utf-8')))
+            self.interval = self.getInterval()
             sleep(self.interval)
 
     def startFollowing(self):
@@ -196,6 +223,13 @@ class twitterClass(botutils.baseClass):
                 self.thread = Thread(target=self.startFollowingThread)
                 self.thread.daemon = False
                 self.thread.start()
+
+    def startFollowingMentions(self):
+        if self.api:
+            if not self.thread_mentions or not self.thread_mentions.isAlive():
+                self.thread_mentions = Thread(target=self.startFollowMentionsThread)
+                self.thread_mentions.daemon = False
+                self.thread_mentions.start()
 
     def getTweetAddress(self, tweetid):
         cur = self.conn.cursor()
@@ -207,14 +241,20 @@ class twitterClass(botutils.baseClass):
         else:
             return None
 
-    def tweet(self, message, address=None):
+    def tweet(self, message, reply_to=None, media=None, address=None):
         if self.api:
             try:
-                status = self.api.PostUpdate(message)
+                if media:
+                    status = self.api.PostMedia(message, media=media, in_reply_to_status_id=reply_to)
+                else:
+                    status = self.api.PostUpdate(message, in_reply_to_status_id=reply_to)
             except TwitterError as e:
+                r = e.message
                 if isinstance(e.message, list) and 'message' in e.message[0]:
-                    return e.message[0]['message']
-                return e.message
+                    r = e.message[0]['message']
+                if r == 'Status is over 140 characters.':
+                    r = '{} Length (approx.) - {}'.format(r, len(message))
+                return r
             else:
                 if address:
                     cur = self.conn.cursor()
@@ -242,11 +282,21 @@ class twitterClass(botutils.baseClass):
     def onSIGNEDON(self):
         sleep(15)
         self.startFollowing()
+        self.startFollowingMentions()
 
     def onPRIVMSG(self, address, target, text):
         if target == self.tweet_channel:
             if text.startswith('!tweet ') and len(text.split(' ')) > 1:
-                r = self.tweet(' '.join(text.split(' ')[1:]), address)
+                r = self.tweet(' '.join(text.split(' ')[1:]), address=address)
+                self.irc.msg(target, r)
+            if text.startswith('!tweetreply ') and len(text.split(' ')) > 2:
+                r = self.tweet(' '.join(text.split(' ')[2:]), reply_to=text.split(' ')[1], address=address)
+                self.irc.msg(target, r)
+            if text.startswith('!tweetmedia ') and len(text.split(' ')) > 2:
+                r = self.tweet(' '.join(text.split(' ')[2:]), media=text.split(' ')[1], address=address)
+                self.irc.msg(target, r)
+            if text.startswith('!tweetmediareply ') and len(text.split(' ')) > 2:
+                r = self.tweet(' '.join(text.split(' ')[3:]), reply_to=text.split(' ')[1], media=text.split(' ')[1], address=address)
                 self.irc.msg(target, r)
             elif text.startswith('!deltweet ') and len(text.split(' ')) > 1:
                 tweetid = text.split(' ')[1]
