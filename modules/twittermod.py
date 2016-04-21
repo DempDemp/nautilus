@@ -1,247 +1,87 @@
-'''
-Copyright 2014 Demp <lidor.demp@gmail.com>
-This file is part of nautilus.
-
-nautilus is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-nautilus is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with nautilus. If not, see <http://www.gnu.org/licenses/>.
-'''
-
-import sqlite3
-from core import botutils
-from twitter import Api, TwitterError
+from core import base
 from time import sleep
+from twitter import Api, TwitterError
+from core.db import Base, session_scope
+from core.auth import Auth
+from core.conf import settings
 from threading import Thread
+from core.utils import KeyValue, Whitelist, split_address
+from sqlalchemy import Column, Integer, String
 
-class twitterClass(botutils.baseClass):
+class Tweet(Base):
+    __tablename__ = 'twitter_tweets'
+
+    id = Column(Integer, primary_key=True)
+    tweet_id = Column(String)
+    networkauth = Column(String)
+
+    @classmethod
+    def get_auth_by_tweet(cls, tweet_id):
+        with session_scope() as session:
+            return session.query(cls.networkauth).filter(cls.tweet_id == tweet_id).scalar()
+
+    @classmethod
+    def add(cls, tweet_id, networkauth):
+        with session_scope() as session:
+            tweet = cls(tweet_id=tweet_id, networkauth=networkauth)
+            session.add(tweet)
+
+class Twitter(base.baseClass):
     '''
-    To setup an account:
-        twitter set TWITTER_CONSUMER_KEY <key>
-        twitter set TWITTER_CONSUMER_SECRET <key>
-        twitter set TWITTER_ACCESS_TOKEN_KEY <key>
-        twitter set TWITTER_ACCESS_TOKEN_SECRET <key>
-        twitter set TWITTER_TWEET_CHANNEL <channel> -- to enable in-channel tweeting
-
-    Set interval:
-        twitter set TWITTER_INTERVAL <seconds>
+    Settings:
+        TWITTER_CONSUMER_KEY <key>
+        TWITTER_CONSUMER_SECRET <key>
+        TWITTER_ACCESS_TOKEN_KEY <key>
+        TWITTER_ACCESS_TOKEN_SECRET <key>
+        TWITTER_TWEET_CHANNEL <channel> -- to enable in-channel tweeting
+        TWITTER_INTERVAL <seconds> -- interval for checking mentions
 
     User flag required: t
     '''
-    def __init__(self, irc):
-        botutils.baseClass.__init__(self, irc)
-        self.irc.logger.warning('Twitter module loaded.')
-        self.conn = sqlite3.connect(self.irc.users.dbfile, check_same_thread=False)
-        self.thread = None
-        self.thread_mentions = None
-        self.createTables()
-        self.interval = self.getInterval()
-        self.api = self.getAPI()
-        self.setFollow()
-        self.startFollowing()
-        self.startFollowingMentions()
-        self.tweet_channel = self.getTweetChannel() or ''
+    thread = None
+    thread_mentions = None
+    interval = settings.TWITTER_INTERVAL
+    tweet_channel = settings.TWITTER_TWEET_CHANNEL
+
+    def __init__(self, *args, **kwargs):
+        super(Twitter, self).__init__(*args, **kwargs)
+        self.api = self.get_api()
+        self.follow_mentions()
 
     def __del__(self):
-        self.follow = False
         self.api = None
-        
-    def setFollow(self):
-        if self.api and len(self.getFollowing()) and self.interval:
-            self.follow = True
-        else:
-            self.follow = False
-        self.irc.logger.info('Twitter following: %s. Interval: %s; API: %s; Following: %s.',
-                             self.follow,
-                             self.interval,
-                             self.api,
-                             len(self.getFollowing()))
 
-    def createTables(self):
-        cur = self.conn.cursor()
-        cur.execute('''CREATE TABLE IF NOT EXISTS twitterFollow (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                botid TEXT NOT NULL,
-                userid TEXT NOT NULL,
-                displayname TEXT NOT NULL,
-                channels TEXT NOT NULL,
-                lasttweet TEXT NOT NULL)''')
-        cur.execute('''CREATE TABLE IF NOT EXISTS twitterTweets (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                botid TEXT NOT NULL,
-                tweetid TEXT NOT NULL,
-                address TEXT NOT NULL)''')
-        self.conn.commit()
-        cur.close()
-
-    def getAPI(self):
-        cur = self.conn.cursor()
-        cur.execute('SELECT setting, sval FROM botSettings WHERE botid=? AND setting LIKE ?', (self.irc.id, 'TWITTER_%'))
-        res = dict(cur.fetchall())
-        cur.close()
+    def get_api(self):
         try:
-            apio = Api(consumer_key=res['TWITTER_CONSUMER_KEY'],
-                consumer_secret=res['TWITTER_CONSUMER_SECRET'],
-                access_token_key=res['TWITTER_ACCESS_TOKEN_KEY'],
-                access_token_secret=res['TWITTER_ACCESS_TOKEN_SECRET'])
-            self.irc.logger.info('Twitter API object created.')
+            apio = Api(consumer_key=settings.TWITTER_CONSUMER_KEY,
+                        consumer_secret=settings.TWITTER_CONSUMER_SECRET,
+                        access_token_key=settings.TWITTER_ACCESS_TOKEN_KEY,
+                        access_token_secret=settings.TWITTER_ACCESS_TOKEN_SECRET)
             return apio
-        except (KeyError, TwitterError) as e:
+        except (AttributeError, TwitterError) as e:
             self.irc.logger.error('Twitter error: %s' % e.message)
             return False
-        return False
 
-    def getFollowing(self):
-        cur = self.conn.cursor()
-        cur.execute('SELECT id, userid, displayname, channels, lasttweet FROM twitterFollow WHERE botid=?', (self.irc.id,))
-        res = cur.fetchall()
-        cur.close()
-        return res
-
-    def getInterval(self):
-        cur = self.conn.cursor()
-        cur.execute("SELECT sval FROM botSettings WHERE botid=? AND setting='TWITTER_INTERVAL'", (self.irc.id,))
-        res = cur.fetchone()
-        cur.close()
-        if res is None:
-            return 600
-        else:
-            return int(res[0])
-
-    def getTweetChannel(self):
-        cur = self.conn.cursor()
-        cur.execute("SELECT sval FROM botSettings WHERE botid=? AND setting='TWITTER_TWEET_CHANNEL'", (self.irc.id,))
-        res = cur.fetchone()
-        cur.close()
-        if res is None:
-            return False
-        else:
-            return res[0]
-
-    def setVar(self, setting, sval):
-        cur = self.conn.cursor()
-        if not setting.startswith('TWITTER_'):
-            setting = 'TWITTER_%s' % setting
-        cur.execute('INSERT OR REPLACE INTO botSettings (botid, setting, sval) VALUES (?, ?, ?)', (self.irc.id, setting, sval))
-        self.conn.commit()
-        cur.close()
-        if setting == 'TWITTER_TWEET_CHANNEL':
-            self.tweet_channel = sval
-
-    def delSetting(self, sid):
-        cur = self.conn.cursor()
-        cur.execute('DELETE FROM botSettings WHERE botid=? AND id=? AND setting LIKE ?', (self.irc.id, sid, 'TWITTER_%'))
-        res = cur.rowcount
-        self.conn.commit()
-        cur.close()
-        if res:
-            self.__init__(self.irc)
-            return True
-        return False
-
-    def getSettings(self):
-        cur = self.conn.cursor()
-        cur.execute('SELECT id, setting, sval FROM botSettings WHERE botid=? AND setting LIKE ?', (self.irc.id, 'TWITTER_%'))
-        res = cur.fetchall()
-        cur.close()
-        return res
-
-    def setLastTweet(self, userid, tweetid):
-        cur = self.conn.cursor()
-        cur.execute('UPDATE twitterFollow SET lasttweet=? WHERE botid=? AND userid=?', (tweetid, self.irc.id, userid))
-        self.conn.commit()
-        cur.close()
-
-    def addFollow(self, userid, displayname, channels):
-        cur = self.conn.cursor()
-        cur.execute('INSERT INTO twitterFollow (botid, userid, displayname, channels, lasttweet) VALUES (?, ?, ?, ?, ?)', 
-                (self.irc.id, userid, displayname, channels, 0))
-        self.conn.commit()
-        cur.close()
-
-    def delFollow(self, fid):
-        cur = self.conn.cursor()
-        cur.execute('DELETE FROM twitterFollow WHERE botid=? AND id=?', (self.irc.id, fid))
-        res = cur.rowcount
-        self.conn.commit()
-        cur.close()
-        if res:
-            return True
-        return False
-
-    def getLastMentionId(self):
-        cur = self.conn.cursor()
-        cur.execute('SELECT sval FROM botSettings WHERE botid=? AND setting=?', (self.irc.id, 'TWITTER_LAST_MENTION_ID'))
-        res = cur.fetchone()
-        cur.close()
-        if res:
-            return res[0]
-        else:
-            return None
-
-    def startFollowingThread(self):
-        while self.follow:
-            self.irc.logger.info('Checking for new tweets')
-            following = self.getFollowing()
-            for u in following:
-                statuses = self.api.GetUserTimeline(u[1])
-                lastId = long(u[4])
-                if lastId == 0:
-                    if len(statuses) > 1:
-                        self.setLastTweet(u[1], statuses[1].id)
-                        lastId = statuses[1].id
-                for i, status in enumerate(statuses):
-                    if i == 0:
-                        self.setLastTweet(u[1], status.id)
-                    if status.id > lastId:
-                        self.irc.msg(u[3], 'Twitter @%s: %s' % (u[2], status.text.replace('\n', '').replace('\r', '').encode('utf-8')))
-            self.interval = self.getInterval()
-            sleep(self.interval)
-
-    def startFollowMentionsThread(self):
+    def follow_mentions_thread(self):
         while self.api and self.tweet_channel:
-            self.irc.logger.info('Checking for new mentions')
-            lastId = self.getLastMentionId()
+            self.irc.logger.debug('Twitter: checking for new mentions')
+            lastId = KeyValue.get_value(self.irc.id, 'TWITTER_LAST_MENTION_ID')
             statuses = self.api.GetMentions(since_id=lastId, count=5)
             for i, status in enumerate(statuses):
                 self.irc.logger.info('New mention: %s', status.id)
                 if i == 0:
-                    self.setVar('TWITTER_LAST_MENTION_ID', status.id)
-                self.irc.msg(self.tweet_channel, 'Twitter @%s: %s' % (status.user.screen_name, status.text.replace('\n', '').replace('\r', '').encode('utf-8')))
-            self.interval = self.getInterval()
+                    KeyValue.set(self.irc.id, 'TWITTER_LAST_MENTION_ID', status.id)
+                self.irc.msg(self.tweet_channel, u'Twitter @{}: {}'.format(status.user.screen_name, status.text.replace('\n', '').replace('\r', '')))
             sleep(self.interval)
 
-    def startFollowing(self):
-        if self.follow:
-            if not self.thread or not self.thread.isAlive():
-                self.thread = Thread(target=self.startFollowingThread)
-                self.thread.daemon = False
-                self.thread.start()
-
-    def startFollowingMentions(self):
+    def follow_mentions(self):
         if self.api:
             if not self.thread_mentions or not self.thread_mentions.isAlive():
-                self.thread_mentions = Thread(target=self.startFollowMentionsThread)
+                self.thread_mentions = Thread(target=self.follow_mentions_thread)
                 self.thread_mentions.daemon = False
                 self.thread_mentions.start()
 
-    def getTweetAddress(self, tweetid):
-        cur = self.conn.cursor()
-        cur.execute('SELECT address FROM twitterTweets WHERE botid=? AND tweetid=?', (self.irc.id, tweetid))
-        res = cur.fetchone()
-        cur.close()
-        if res:
-            return res[0]
-        else:
-            return None
-
-    def tweet(self, message, reply_to=None, media=None, address=None):
+    def tweet(self, message, reply_to=None, media=None, networkauth=None):
         if self.api:
             try:
                 if media:
@@ -256,17 +96,13 @@ class twitterClass(botutils.baseClass):
                     r = '{} Length (approx.) - {}'.format(r, len(message))
                 return r
             else:
-                if address:
-                    cur = self.conn.cursor()
-                    cur.execute('INSERT INTO twitterTweets (botid, tweetid, address) VALUES (?, ?, ?)', 
-                            (self.irc.id, status.id, address))
-                    self.conn.commit()
-                    cur.close()
+                if networkauth:
+                    Tweet.add(status.id, networkauth)
                 return 'https://twitter.com/{}/status/{}'.format(status.user.screen_name, status.id)
         else:
             return 'No api defined'
 
-    def deleteTweet(self, tweetid):
+    def tweet_delete(self, tweetid):
         if self.api:
             try:
                 self.api.DestroyStatus(tweetid)
@@ -279,114 +115,84 @@ class twitterClass(botutils.baseClass):
         else:
             return 'No api defined'
 
-    def onSIGNEDON(self):
+    def on_signedon(self):
         sleep(15)
-        self.startFollowing()
-        self.startFollowingMentions()
+        self.follow_mentions()
 
-    def onPRIVMSG(self, address, target, text):
+    def on_privmsg(self, address, target, text):
         if target == self.tweet_channel:
-            if text.startswith('!tweet ') and len(text.split(' ')) > 1:
-                r = self.tweet(' '.join(text.split(' ')[1:]), address=address)
+            if text[0] not in base.prefix:
+                return
+            nickname, username, hostname = split_address(address)
+            command = text.strip().split(' ', 1)[0][1:]
+            if 'tweet' not in command:
+                return
+            params = text.split()[1:]
+            user = self.irc.network.get_user_by_nickname(nickname)
+            if not user or not user.networkauth or not Whitelist.has_permission(self.irc.id, user.networkauth, 'twitter'):
+                return
+            if command == 'tweet' and len(params):
+                r = self.tweet(' '.join(params), networkauth=user.networkauth)
                 self.irc.msg(target, r)
-            if text.startswith('!tweetreply ') and len(text.split(' ')) > 2:
-                r = self.tweet(' '.join(text.split(' ')[2:]), reply_to=text.split(' ')[1], address=address)
+            if command == 'tweetreply' and len(params) > 1:
+                r = self.tweet(' '.join(params[1:]), reply_to=params[0], networkauth=user.networkauth)
                 self.irc.msg(target, r)
-            if text.startswith('!tweetmedia ') and len(text.split(' ')) > 2:
-                r = self.tweet(' '.join(text.split(' ')[2:]), media=text.split(' ')[1], address=address)
+            if command == 'tweetmedia' and len(params) > 1:
+                r = self.tweet(' '.join(params[1:]), media=params[0], networkauth=user.networkauth)
                 self.irc.msg(target, r)
-            if text.startswith('!tweetmediareply ') and len(text.split(' ')) > 2:
-                r = self.tweet(' '.join(text.split(' ')[3:]), reply_to=text.split(' ')[1], media=text.split(' ')[1], address=address)
+            if command == 'tweetmediareply' and len(params) > 1:
+                r = self.tweet(' '.join(params[2:]), reply_to=params[0], media=params[0], networkauth=user.networkauth)
                 self.irc.msg(target, r)
-            elif text.startswith('!deltweet ') and len(text.split(' ')) > 1:
-                tweetid = text.split(' ')[1]
-                tweet_address = self.getTweetAddress(tweetid)
-                flags = self.irc.users.getFlags(hostmask=address)
-                if tweet_address or flags is not None and 't' in flags[1]:
-                    if tweet_address and tweet_address.split('!')[1] == address.split('!')[1] or flags is not None and 't' in flags[1]:
-                        r = self.deleteTweet(tweetid)
+            elif command == 'deltweet' and len(params):
+                tweetid = params[0]
+                tweetauth = Tweet.get_auth_by_tweet(tweetid)
+                user = Auth.get_user_by_hostmask(self.irc.id, address)
+                if tweetauth or user is not None and 't' in user.flags:
+                    if tweetauth == user.networkauth or flags is not None and 't' in flags[1]:
+                        r = self.tweet_delete(tweetid)
                         self.irc.msg(target, r)
                     else:
-                        self.irc.msg(target, 'You are not the tweet author (author: {})'.format(tweet_address))
+                        self.irc.msg(target, 'You are not the tweet author (author: {})'.format(tweetauth))
                 else:
                     self.irc.msg(target, 'No such tweet on record')
-            elif text.startswith('!whotweeted ') and len(text.split(' ')) > 1:
-                tweetid = text.split(' ')[1]
-                tweet_address = self.getTweetAddress(tweetid)
-                if tweet_address:
-                    self.irc.msg(target, 'Author: {}'.format(tweet_address))
+            elif command == 'whotweeted' and len(params):
+                tweetid = params[0]
+                tweetauth = Tweet.get_auth_by_tweet(tweetid)
+                if tweetauth:
+                    self.irc.msg(target, 'Author: {}'.format(tweetauth))
                 else:
                     self.irc.msg(target, 'No such tweet on record')
-        elif target == self.irc.nickname and text.startswith('twitter'):
-            params = text.split(' ')
-            if params[0] != 'twitter':
-                return
-            flags = self.irc.users.getFlags(hostmask=address)
-            if flags is None or 't' not in flags[1]:
-                self.irc.notice(address.split('!')[0], 'Insufficient privileges')
-                return
-            if len(params) == 1:
-                self.irc.notice(address.split('!')[0], 'Available commands: tweet deltweet whotweeted set delsetting listsettings follow listfollowing unfollow')
-                return
-            if params[1] == 'tweet':
-                r = self.tweet(' '.join(params[2:]))
-                self.irc.notice(address.split('!')[0], r)
-                return
-            if params[1] == 'whotweeted':
-                tweetid = text.split(' ')[2]
-                tweet_address = self.getTweetAddress(tweetid)
-                if tweet_address:
-                    self.irc.notice(address.split('!')[0], 'Author: {}'.format(tweet_address))
+        elif target == self.irc.nickname and text.split(' ', 1)[0] == 'twitter':
+            try:
+                command = text.split()[1]
+                params = text.split()[2:]
+            except IndexError:
+                command = None
+                params = []
+            nickname, username, hostname = split_address(address)
+            user = Auth.get_user_by_hostmask(self.irc.id, address)
+            if user is None or 't' not in user.flags:
+                self.irc.notice(nickname, 'Insufficient privileges')
+            elif not command:
+                self.irc.notice(nickname, 'Available commands: tweet deltweet whotweeted')
+            elif command == 'tweet':
+                if len(params):
+                    r = self.tweet(' '.join(params))
+                    self.irc.notice(nickname, r)
                 else:
-                    self.irc.notice(address.split('!')[0], 'No such tweet on record')
-            if params[1] == 'deltweet':
-                tweetid = text.split(' ')[2]
-                r = self.deleteTweet(tweetid)
-                self.irc.notice(address.split('!')[0], r)
-            if params[1] == 'set':
-                if len(params) < 4:
-                    self.irc.notice(address.split('!')[0], 'Usage: twitter set <key> <value>')
-                else:
-                    self.setVar(params[2], ' '.join(params[3:]))
-                    self.irc.notice(address.split('!')[0], 'Done')
-                    self.setFollow()
-                    self.startFollowing()
-            if params[1] == 'delsetting':
-                if len(params) < 3:
-                    self.irc.notice(address.split('!')[0], 'Usage: twitter delsetting <id>>')
-                else:
-                    if self.delSetting(params[2]):
-                        self.irc.notice(address.split('!')[0], 'Done')
+                    self.irc.notice(nickname, 'No text provided')
+            elif command == 'whotweeted':
+                if len(params):
+                    tweetauth = Tweet.get_auth_by_tweet(params[0])
+                    if tweetauth:
+                        self.irc.notice(nickname, 'Author: {}'.format(tweetauth))
                     else:
-                        self.irc.notice(address.split('!')[0], 'Unable to delete setting')
-            elif params[1] == 'listsettings':
-                settings = self.getSettings()
-                self.irc.notice(address.split('!')[0], 'id key value')
-                for s in settings:
-                    self.irc.notice(address.split('!')[0], '%s %s %s' % s)
-            elif params[1] == 'follow':
-                if len(params) != 5:
-                    self.irc.notice(address.split('!')[0], 'Usage: twitter follow <userid> <displayname> <channels>')
+                        self.irc.notice(nickname, 'No such tweet on record')
                 else:
-                    self.addFollow(params[2], params[3], params[4])
-                    self.irc.notice(address.split('!')[0], 'Done')
-                    self.setFollow()
-                    self.startFollowing()
-            elif params[1] == 'listfollowing':
-                following = self.getFollowing()
-                self.irc.notice(address.split('!')[0], 'id userid displayname channels lasttweet')
-                for x in following:
-                    self.irc.notice(address.split('!')[0], '%s %s %s %s %s' % x)
-            elif params[1] == 'unfollow':
-                if len(params) != 3:
-                    self.irc.notice(address.split('!')[0], 'Usage: twitter unfollow <id>')
+                    self.irc.notice(nickname, 'No tweet id provided')
+            if command == 'deltweet':
+                if len(params):
+                    r = self.deleteTweet(params[0])
+                    self.irc.notice(nickname, r)
                 else:
-                    if self.delFollow(params[2]):
-                        self.irc.notice(address.split('!')[0], 'Done')
-                    else:
-                        self.irc.notice(address.split('!')[0], 'Unable to unfollow id')
-            elif params[1] == 'var' and len(params) == 3:
-                self.irc.notice(address.split('!')[0], str(getattr(self, params[2])))
-
-
-MODCLASSES = [twitterClass]
+                    self.irc.notice(nickname, 'No tweet id provided')

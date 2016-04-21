@@ -1,103 +1,72 @@
-'''
-Copyright 2014 Demp <lidor.demp@gmail.com>
-This file is part of nautilus.
+from core import base
+from core.db import Base, session_scope
+from core.auth import Auth
+from sqlalchemy import Column, Integer, String
 
-nautilus is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
+class Perform(Base):
+    __tablename__ = 'perform'
 
-nautilus is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
+    id = Column(Integer, primary_key=True)
+    bot_id = Column(String)
+    pline = Column(String)
 
-You should have received a copy of the GNU Affero General Public License
-along with nautilus. If not, see <http://www.gnu.org/licenses/>.
-'''
+    @classmethod
+    def list_lines(cls, bot_id):
+        with session_scope() as session:
+            return session.query(cls.id, cls.pline).filter(cls.bot_id == bot_id).all()
 
-import sqlite3
-from core import botutils
+    @classmethod
+    def add(cls, bot_id, pline):
+        with session_scope() as session:
+            perform = cls(bot_id=bot_id, pline=pline)
+            session.add(perform)
+            session.commit()
+            return perform.id
 
-class performClass(botutils.baseClass):
-    def __init__(self, irc):
-        botutils.baseClass.__init__(self, irc)
-        self.conn = sqlite3.connect(self.irc.users.dbfile, check_same_thread=False)
-        self.createTables()
+    @classmethod
+    def delete(cls, bot_id, id):
+        with session_scope() as session:
+            perform = session.query(cls).filter(cls.bot_id == bot_id, cls.id == id).first()
+            if perform:
+                session.delete(perform)
+                return True
+            return False
 
-    def createTables(self):
-        cur = self.conn.cursor()
-        cur.execute('''CREATE TABLE IF NOT EXISTS perform (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                botid TEXT NOT NULL,
-                pline TEXT NOT NULL)''')
-        self.conn.commit()
-        cur.close()
+class PerformClass(base.baseClass):
+    def on_signedon(self):
+        lines = Perform.list_lines(self.irc.id)
+        for _, line in lines:
+            self.irc.sendLine(line)
 
-    def getLines(self):
-        cur = self.conn.cursor()
-        cur.execute('SELECT id, pline FROM perform WHERE botid=?', (self.irc.id,))
-        res = cur.fetchall()
-        cur.close()
-        return res
-
-    def addPerform(self, line):
-        cur = self.conn.cursor()
-        cur.execute('INSERT INTO perform (botid, pline) VALUES (?, ?)', (self.irc.id, line))
-        self.conn.commit()
-        cur.close()
-        return True
-
-    def delPerform(self, pid):
-        cur = self.conn.cursor()
-        cur.execute('DELETE FROM perform WHERE botid=? AND id=?', (self.irc.id, pid))
-        affected = cur.rowcount
-        self.conn.commit()
-        cur.close()
-        if affected:
-            return True
-        return False
-
-    def onSIGNEDON(self):
-        lines = self.getLines()
-        for l in lines:
-            self.irc.sendLine(l[1])
-
-    def onPRIVMSG(self, address, target, text):
+    def on_privmsg(self, address, target, text):
+        nickname = address.split('!')[0]
         if target == self.irc.nickname:
             if text.startswith('perform'):
-                params = text.split(' ')
+                params = text.split()
                 if params[0] != 'perform':
                     return
-                flags = self.irc.users.getFlags(hostmask=address)
-                if flags is None or 'n' not in flags[1]:
-                    self.irc.notice(address.split('!')[0], 'Insufficient privileges')
-                    return
-                if len(params) == 1:
-                    self.irc.notice(address.split('!')[0], 'Available commands: list add delete')
-                    return
-                if params[1] == 'list':
-                    lines = self.getLines()
-                    self.irc.notice(address.split('!')[0], 'id line')
+                user = Auth.get_user_by_hostmask(self.irc.id, address)
+                if user is None or 'n' not in user.flags:
+                    self.irc.notice(nickname, 'Insufficient privileges')
+                elif len(params) == 1:
+                    self.irc.notice(nickname, 'Available commands: list add delete')
+                elif params[1] == 'list':
+                    lines = Perform.list_lines(self.irc.id)
+                    self.irc.notice(nickname, 'Id Line')
                     for l in lines:
-                        self.irc.notice(address.split('!')[0], '%s %s' % l)
-                    return
+                        self.irc.notice(nickname, '%s %s' % l)
+                    self.irc.notice(nickname, 'End of list')
                 elif params[1] == 'add':
                     if len(params) < 3:
-                        self.irc.notice(address.split('!')[0], 'Usage: perform add <line>')
-                        return
+                        self.irc.notice(nickname, 'Usage: perform add <line>')
                     else:
-                        self.addPerform(' '.join(params[2:]))
-                        self.irc.notice(address.split('!')[0], 'Done')
-                    return
+                        pid = Perform.add(self.irc.id, ' '.join(params[2:]))
+                        self.irc.notice(nickname, 'Done. Id: {}'.format(pid))
                 elif params[1] == 'delete':
                     if len(params) < 3:
-                        self.irc.notice(address.split('!')[0], 'Usage: perform delete <id>')
-                        return
+                        self.irc.notice(nickname, 'Usage: perform delete <id>')
                     else:
-                        if self.delPerform(params[2]):
-                            self.irc.notice(address.split('!')[0], 'Done')
+                        if Perform.delete(self.irc.id, params[2]):
+                            self.irc.notice(nickname, 'Done')
                         else:
-                            self.irc.notice(address.split('!')[0], 'Unable to delete line')
-                    return
-
-MODCLASSES = [performClass]
+                            self.irc.notice(nickname, 'Unable to delete line')

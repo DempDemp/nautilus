@@ -1,156 +1,109 @@
-'''
-Copyright 2014 Demp <lidor.demp@gmail.com>
-This file is part of nautilus.
-
-nautilus is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-nautilus is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with nautilus. If not, see <http://www.gnu.org/licenses/>.
-'''
-
-import urllib
 import urllib2
-import sqlite3
 import re
-from core import botutils
-from urlparse import urlparse
+import HTMLParser
+from core import base
+from core.db import Base, session_scope
+from core.auth import Auth
+from sqlalchemy import Column, Integer, String
 from BeautifulSoup import BeautifulSoup
 
-titleregex = re.compile('<title(?:[a-zA-Z\= \'\"]*)>([^<]*)</title>', re.DOTALL | re.MULTILINE | re.IGNORECASE)
-charsetregex = re.compile('charset=([\w\-]+)', re.DOTALL | re.MULTILINE | re.IGNORECASE)
+class TitleRegex(Base):
+    __tablename__ = 'title_regex'
 
+    id = Column(Integer, primary_key=True)
+    bot_id = Column(String)
+    regex = Column(String)
 
-class titleClass(botutils.baseClass):
-    def __init__(self, irc):
-        botutils.baseClass.__init__(self, irc)
-        self.conn = sqlite3.connect(self.irc.users.dbfile, check_same_thread=False)
-        self.createTables()
-        self.regexes = []
-        self.setRegexes()
+    @classmethod
+    def list_regexes(cls, bot_id):
+        with session_scope() as session:
+            return session.query(cls.id, cls.regex).filter(cls.bot_id == bot_id).all()
 
-    def createTables(self):
-        cur = self.conn.cursor()
-        cur.execute('''CREATE TABLE IF NOT EXISTS title_regex (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                botid TEXT NOT NULL,
-                regex TEXT NOT NULL)''')
-        self.conn.commit()
-        cur.close()
+    @classmethod
+    def add(cls, bot_id, regex):
+        re.compile(regex)
+        with session_scope() as session:
+            treg = cls(bot_id=bot_id, regex=regex)
+            session.add(treg)
+            session.commit()
+            return treg.id
 
-    def getRegexes(self):
-        cur = self.conn.cursor()
-        cur.execute('SELECT id, regex FROM title_regex WHERE botid=?', (self.irc.id,))
-        res = cur.fetchall()
-        cur.close()
-        return res
+    @classmethod
+    def delete(cls, bot_id, id):
+        with session_scope() as session:
+            treg = session.query(cls).filter(cls.bot_id == bot_id, cls.id == id).first()
+            if treg:
+                session.delete(treg)
+                return True
+            return False
 
-    def addRegex(self, regex):
-        cur = self.conn.cursor()
-        cur.execute('INSERT INTO title_regex (botid, regex) VALUES (?, ?)', (self.irc.id, regex))
-        self.conn.commit()
-        cur.close()
+h = HTMLParser.HTMLParser()
 
-    def delRegex(self, rid):
-        cur = self.conn.cursor()
-        cur.execute('DELETE FROM title_regex WHERE botid=? AND id=?', (self.irc.id, rid))
-        res = cur.rowcount
-        self.conn.commit()
-        cur.close()
-        if res:
-            return True
-        return False
+class Titles(base.baseClass):
+    test = 2
+    def __init__(self, *args, **kwargs):
+        super(Titles, self).__init__(*args, **kwargs)
+        self.set_regex_list()
 
-    def setRegexes(self):
-        regexes = self.getRegexes()
-        for rid, regex in regexes:
-            self.regexes.append(re.compile(regex))
+    def set_regex_list(self):
+        self.regexps = []
+        for _, regex in TitleRegex.list_regexes(self.irc.id):
+            self.regexps.append(re.compile(regex))
 
-    def purify(self, s):
-        if isinstance(s, str) or isinstance(s, unicode):
-            return unicode(BeautifulSoup(s.replace("\n", '').replace("\r", '').replace("\t", ''), convertEntities=BeautifulSoup.HTML_ENTITIES))
-        else:
-            return s
+    def get_title(self, url):
+        soup = BeautifulSoup(urllib2.urlopen(url))
+        title = h.unescape(soup.title.string)
+        title = ' '.join(title.replace('\r', '').replace('\n', '').split())
+        return url, title
 
-    def getTitle(self, url):
-        if len(url) == 0:
-            return {'error': 'error'}
-        host = urlparse(url)
-        host = host.netloc
-        req = urllib2.Request(url)
-        try:
-            response = urllib2.urlopen(req)
-        except urllib2.HTTPError, e:
-            return {'error': 'error'}
-        data = response.read()
-
-        title = titleregex.search(data)
-        if title is not None:
-            title = title.group(1)
-        else:
-            return {'error': 'error'}
-        charset = charsetregex.search(data)
-        if charset is not None:
-            charset = charset.group(1)
-            if charset.lower() != 'utf-8':
-                title = title.decode(charset)
-        return {'url': url, 'title': self.purify(title)}
-
-    def privmsg_format(self, result):
-        if 'error' in result:
-            msg = ''
-        else:
-            if len(result['title']) > 200:
-                result['title'] = result['title'][0:197] + '...'
-            msg = 'Title: ' + result['title'] + '.'
-        return msg
-
-    def onPRIVMSG(self, address, target, text):
-        if target[0] == '#' and 'http' in text:
-            for regex in self.regexes:
+    def on_privmsg(self, address, target, text):
+        if target.startswith('#') and 'http' in text:
+            for regex in self.regexps:
                 titlesearch = regex.search(text)
                 if titlesearch is not None:
                     link = titlesearch.group(1)
-                    result = self.getTitle(link)
-                    if not 'error' in result:
-                        self.irc.msg(target, self.privmsg_format(result))
+                    try:
+                        url, title = self.get_title(link)
+                    except (urllib2.HTTPError, AttributeError) as e:
+                        self.irc.logger.exception(e)
+                        self.irc.msg(target, 'Unable to retrieve title')
+                    else:
+                        if len(title) > 200:
+                            title = title[0:197] + '...'
+                        self.irc.msg(target, u'Title: {}'.format(title))
                     break
         elif target == self.irc.nickname and text.startswith('titles'):
-            params = text.split(' ')
+            nickname = address.split('!')[0]
+            params = text.split()
             if params[0] != 'titles':
                 return
-            flags = self.irc.users.getFlags(hostmask=address)
-            if flags is None or 'w' not in flags[1]:
-                self.irc.notice(address.split('!')[0], 'Insufficient privileges')
-                return
-            if len(params) == 1:
-                self.irc.notice(address.split('!')[0], 'Available commands: add del list')
-                return
+            user = Auth.get_user_by_hostmask(self.irc.id, address)
+            if user is None or 'w' not in user.flags:
+                self.irc.notice(nickname, 'Insufficient privileges')
+            elif len(params) == 1:
+                self.irc.notice(nickname, 'Available commands: add del list')
             elif params[1] == 'add':
                 if len(params) != 3:
-                    self.irc.notice(address.split('!')[0], 'Usage: titles add <regex>')
+                    self.irc.notice(nickname, 'Usage: titles add <regex>')
                 else:
-                    self.addRegex(' '.join(params[2:]))
-                    self.irc.notice(address.split('!')[0], 'Done')
-                    self.setRegexes()
+                    try:
+                        rid = TitleRegex.add(self.irc.id, ' '.join(params[2:]))
+                    except re.error as e:
+                        self.irc.notice(nickname, 'Invalid regexp: {}'.format(e))
+                    else:
+                        self.irc.notice(nickname, 'Done. Regex id: {}'.format(rid))
+                    self.set_regex_list()
             elif params[1] == 'del':
                 if len(params) != 3:
-                    self.irc.notice(address.split('!')[0], 'Usage: twitter del <id>')
+                    self.irc.notice(nickname, 'Usage: titles del <id>')
                 else:
-                    if self.delRegex(params[2]):
-                        self.irc.notice(address.split('!')[0], 'Done')
+                    if TitleRegex.delete(self.irc.id, params[2]):
+                        self.irc.notice(nickname, 'Done')
                     else:
-                        self.irc.notice(address.split('!')[0], 'Unable to delete regex')
+                        self.irc.notice(nickname, 'Unable to delete regex')
             elif params[1] == 'list':
-                regexes = self.getRegexes()
-                self.irc.notice(address.split('!')[0], 'id regex')
+                regexps = TitleRegex.list_regexes(self.irc.id)
+                self.irc.notice(nickname, 'Id Regex')
                 for x in regexes:
-                    self.irc.notice(address.split('!')[0], '%s %s' % x)
-
-MODCLASSES = [titleClass]
+                    self.irc.notice(nickname, '%s %s' % x)
+                self.irc.notice(nickname, 'End of list')

@@ -1,81 +1,46 @@
-'''
-Copyright 2014 Demp <lidor.demp@gmail.com>
-This file is part of nautilus.
-
-nautilus is free software: you can redistribute it and/or modify
-it under the terms of the GNU Affero General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-nautilus is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Affero General Public License for more details.
-
-You should have received a copy of the GNU Affero General Public License
-along with nautilus. If not, see <http://www.gnu.org/licenses/>.
-'''
-
-import json
-import time
 import sys
+import time
 import logging
-from twisted.words.protocols import irc
-from twisted.internet import ssl, reactor, protocol
-from twisted.internet.threads import deferToThread
-from core.users import UserAccess
+import settings
+import core.conf
+from core.base import baseClass
 from threading import Lock
-
+from twisted.internet import ssl, reactor, protocol
+from twisted.words.protocols import irc
+from twisted.internet.threads import deferToThread
 
 class nautilusBot(irc.IRCClient):
     versionName = 'nautilus'
-    versionNum = '2.0'
+    versionNum = '3.0'
     class_instances = []
     loaded_modules = []
-    _floodQueue = []
-    _floodLast = 0
-    _floodCurrentBuffer = 0
-    _floodWaitInvalid = False
-    _floodLock = Lock()
+    _flood_buffer = 1024
+    _flood_queue = []
+    _flood_last = 0
+    _flood_current_buffer = 0
+    _flood_wait_invalid = False
+    _flood_lock = Lock()
 
-    def setParamsFromFactory(self):
+    @classmethod
+    def add_func(cls, name, mappedname):
+        def inner_func(self, *args, **kwargs):
+            for instance in self.class_instances:
+                if instance.defer_to_thread:
+                    deferToThread(getattr(instance, mappedname), *args, **kwargs)
+                else:
+                    getattr(instance, mappedname)(*args, **kwargs)
+        inner_func.__name__ = name
+        setattr(cls, name, inner_func)
+
+    def set_params_factory(self):
+        self._flood_buffer = self.factory._flood_buffer
         self.nickname = self.factory.nickname
         self.realname = self.factory.realname
-        self.floodBuffer = self.factory.floodBuffer
-        self.dbfile = self.factory.dbfile
         self.id = self.factory.botid
         self.logger = self.factory.logger
 
     def connectionMade(self):
         irc.IRCClient.connectionMade(self)
-
-    def signedOn(self):
-        for instance in self.class_instances:
-            deferToThread(instance.onSIGNEDON)
-
-    def privmsg(self, user, channel, msg):
-        for instance in self.class_instances:
-            deferToThread(instance.onPRIVMSG, user, channel, msg)
-
-    def noticed(self, user, channel, message):
-        for instance in self.class_instances:
-            deferToThread(instance.onNOTICE, user, channel, message)
-
-    def userJoined(self, user, channel):
-        for instance in self.class_instances:
-            deferToThread(instance.onJOIN, user, channel)
-
-    def userLeft(self, user, channel):
-        for instance in self.class_instances:
-            deferToThread(instance.onPART, user, channel)
-
-    def userQuit(self, user, quitMessage):
-        for instance in self.class_instances:
-            deferToThread(instance.onQUIT, user, quitMessage)
-
-    def userRenamed(self, oldname, newname):
-        for instance in self.class_instances:
-            deferToThread(instance.onNICK, oldname, newname)
 
     def sendLine(self, line, queue=True):
         ''' normal sendLine with flood protection '''
@@ -86,41 +51,41 @@ class nautilusBot(irc.IRCClient):
                 pass
         if line.startswith(('PRIVMSG', 'NOTICE')):
             length = sys.getsizeof(line) - sys.getsizeof(type(line)()) + 2
-            if length <= self.floodBuffer - self._floodCurrentBuffer:
+            if length <= self._flood_buffer - self._flood_current_buffer:
                 # buffer isn't full, send
-                self.updateFloodBuffer(length)
+                self.update_flood_buffer(length)
                 irc.IRCClient.sendLine(self, line)
                 return True
             else:
                 # send an invalid command
                 if queue:
-                    with self._floodLock:
-                        self._floodQueue.append(line)
-                if not self._floodWaitInvalid:
+                    with self._flood_lock:
+                        self._flood_queue.append(line)
+                if not self._flood_wait_invalid:
                     irc.IRCClient.sendLine(self, '_!')
-                    self._floodWaitInvalid = True
+                    self._flood_wait_invalid = True
                 return False
         else:
             irc.IRCClient.sendLine(self, line)
             return True
 
-    def updateFloodBuffer(self, length):
-        if time.time() - self._floodLast >= 90:
+    def update_flood_buffer(self, length):
+        if time.time() - self._flood_last >= 90:
             # reset flood buffer
-            self._floodCurrentBuffer = length
+            self._flood_current_buffer = length
         else:
-            self._floodCurrentBuffer += length
-        self._floodLast = time.time()
+            self._flood_current_buffer += length
+        self._flood_last = time.time()
 
     def irc_unknown(self, prefix, command, params):
         if command == 'ERR_UNKNOWNCOMMAND':
-            with self._floodLock:
-                self._floodCurrentBuffer = 0
-                self._floodWaitInvalid = False
-                while self._floodQueue:
-                    line = self._floodQueue[0]
+            with self._flood_lock:
+                self._flood_current_buffer = 0
+                self._flood_wait_invalid = False
+                while self._flood_queue:
+                    line = self._flood_queue[0]
                     if self.sendLine(line, queue=False):
-                        self._floodQueue.pop(0)
+                        self._flood_queue.pop(0)
                     else:
                         break
 
@@ -134,22 +99,67 @@ class nautilusBot(irc.IRCClient):
             self.logger.debug(line)
         irc.IRCClient._reallySendLine(self, line)
 
+    def irc_JOIN(self, prefix, params):
+        nick = prefix.split('!', 1)[0]
+        channel = params[-1]
+        if nick == self.nickname:
+            self.joined(channel)
+        else:
+            self.userJoined(prefix, channel)
+
+    def irc_PART(self, prefix, params):
+        channel = params[0]
+        reason = None
+        if len(params) == 2:
+            reason = params[1]
+        if prefix.split('!', 1)[0] == self.nickname:
+            self.left(channel)
+        else:
+            self.userLeft(prefix, channel, reason)
+
+    def irc_QUIT(self, prefix, params):
+        self.userQuit(prefix, params[0])
+
+    def irc_RPL_NAMREPLY(self, prefix, params):
+        self.on_names(params[-2], params[-1].split())
 
 class nautilusBotFactory(protocol.ClientFactory):
     protocol = nautilusBot
-    defaultmodules = ['core.users', 'core.perform', 'core.botutils']
+    default_modules = ['core.auth', 'core.perform', 'core.utils', 'core.tracker']
+    mapped_funcs = (
+        ('signedOn', 'on_signedon'),
+        ('isupport', 'on_network_supports'),
+        ('on_names', 'on_names'),
+        ('irc_354', 'on_who_special'),
+        ('privmsg', 'on_privmsg'),
+        ('noticed', 'on_notice'),
+        ('action', 'on_action'),
+        ('topicUpdated', 'on_topic'),
+        ('modeChanged', 'on_mode'),
+        ('userJoined', 'on_join'),
+        ('userLeft', 'on_part'),
+        ('userQuit', 'on_quit'),
+        ('userRenamed', 'on_nick'),
+        ('userKicked', 'on_kick'),
+        ('joined', 'on_self_join'),
+        ('left', 'on_self_part'),
+        ('nickChanged', 'on_self_nick'),
+        ('kickedFrom', 'on_self_kick'),
+    )
 
-    def __init__(self, botid, factories, configfile='config.json'):
+    def __init__(self, botid, factories):
+        for name, mappedname in self.mapped_funcs:
+            nautilusBot.add_func(name, mappedname)
         self.factories = factories
-        self.configfile = configfile
         self.botid = botid
-        self.setFromJSON()
+        self.debug = core.conf.settings.DEBUG
+        self.load_settings()
         self.logger = logging.getLogger(self.botid)
         ch = logging.StreamHandler(sys.stdout)
         ch.setLevel(logging.DEBUG)
         self.logger.addHandler(ch)
-        fh = logging.FileHandler('%s.log' % self.botid, encoding='utf-8')
-        fh.setLevel(logging.INFO)
+        fh = logging.FileHandler('{}.log'.format(self.botid))
+        fh.setLevel(logging.DEBUG)
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         fh.setFormatter(formatter)
         self.logger.addHandler(fh)
@@ -158,84 +168,86 @@ class nautilusBotFactory(protocol.ClientFactory):
         else:
             self.logger.setLevel(logging.INFO)
 
-    def setFromJSON(self):
-        with open(self.configfile) as f:
-            j = json.load(f)
-        for b in j['bots']:
-            if b['id'] == self.botid:
-                self.nickname = b['nickname']
-                self.realname = b['realname']
-                self.modules = b['modules']
-                self.floodBuffer = b['floodBuffer']
-                self.dbfile = b['dbfile']
-                self.debug = b['debug']
-                return
-
-    def buildProtocol(self, addr):
-        self.bot = nautilusBot()
-        self.bot.factory = self
-        self.bot.setParamsFromFactory()
-        self.bot.users = UserAccess(self.bot)
-        self.reload_all_modules()
-        self.initialize_modules()
-        return self.bot
-
-    def clientConnectionLost(self, connector, reason):
-        """If we get disconnected, reconnect to server."""
-        print 'connection lost:', reason
-        connector.connect()
-
-    def clientConnectionFailed(self, connector, reason):
-        print 'connection failed:', reason
-        reactor.stop()
+    def load_settings(self):
+        for bot in core.conf.settings.BOTS:
+            if bot['id'] == self.botid:
+                self.nickname = bot['nickname']
+                self.realname = bot['realname']
+                self.modules = bot['modules']
+                self._flood_buffer = bot['flood_buffer']
+                break
 
     def initialize_modules(self):
-        self.bot.loaded_modules = []
+        from core.db import Base, engine
         self.logger.info('Loading modules')
-        mlist = self.defaultmodules + self.modules
-        for m in mlist:
-            loaded = True
-            if not m.startswith('core.'):
-                m = 'modules.%s' % m
+        loaded_modules = []
+        loaded_modules_names = []
+        cls_list = []
+        modules = self.default_modules + self.modules
+        for modulename in modules:
+            if not modulename.startswith('core.'):
+                modulename = 'modules.%s' % modulename
             try:
-                self.logger.info('Loading {}'.format(m))
-                mo = __import__(m, globals(), locals(), ['MODCLASSES'], -1)
-                reload(mo)
-                for c in mo.MODCLASSES:
-                    ci = c(self.bot)
-                    self.bot.class_instances.append(ci)
+                self.logger.info('Loading {}'.format(modulename))
+                module = __import__(modulename, globals(), locals(), [], -1)
+                if module in self.bot.loaded_modules:
+                    print 'trying to reload %s' % modulename
+                    reload(module)
             except ImportError as e:
-                loaded = False # could not load module
-                self.logger.warn('Unable to load {}. {}'.format(m, e))
-            if loaded:
-                self.bot.loaded_modules.append(mo)
+                self.logger.warn('Unable to load {}. {}'.format(modulename, e))
+            else:
+                loaded_modules.append(module)
+                loaded_modules_names.append(modulename)
+        self.bot.loaded_modules = loaded_modules
+        Base.metadata.create_all(engine)
+        print baseClass.__subclasses__()
+        for cls in baseClass.__subclasses__():
+            if cls.__module__ in loaded_modules_names:
+                instance = cls(self.bot)
+                self.bot.class_instances.append(instance)
 
     def reload_all_modules(self):
         for class_instance in self.bot.class_instances:
             # explicitly call __del__ for each class instance in case it's running a thread
-            class_instance.__del__()
+            if hasattr(class_instance, '__del__'):
+                class_instance.__del__()
         self.bot.class_instances = []
 
     def reload_modules(self):
+        from core.db import Base
+        reload(settings)
+        core.conf.settings.setup(settings)
+        self.load_settings()
+        Base.metadata.clear()
         for factory in self.factories:
             factory.reload_all_modules()
         for factory in self.factories:
             factory.initialize_modules()
 
+    def buildProtocol(self, addr):
+        self.bot = nautilusBot()
+        self.bot.factory = self
+        self.bot.set_params_factory()
+        self.reload_all_modules()
+        self.initialize_modules()
+        return self.bot
+
+    def clientConnectionLost(self, connector, reason):
+        self.logger.error('Connection lost: %s', reason)
+        connector.connect()
+
+    def clientConnectionFailed(self, connector, reason):
+        self.logger.error('Connection failed: %s', reason)
+        reactor.stop()
 
 if __name__ == '__main__':
-    with open('config.json') as f:
-        j = json.load(f)
+    core.conf.settings.setup(settings)
     factories = []
-    for b in j['bots']:
-        # create factory protocol and application
-        botFactory = nautilusBotFactory(b['id'], factories)
+    for bot in core.conf.settings.BOTS:
+        botFactory = nautilusBotFactory(bot['id'], factories)
         factories.append(botFactory)
-        # connect factory to this host and port
-        if b['ssl']:
-            reactor.connectSSL(b['server'], b['port'], botFactory, ssl.CertificateOptions())
+        if bot['ssl']:
+            reactor.connectSSL(bot['server'], bot['port'], botFactory, ssl.CertificateOptions())
         else:
-            reactor.connectTCP(b['server'], b['port'], botFactory)
-
-    # run bot
+            reactor.connectTCP(bot['server'], bot['port'], botFactory)
     reactor.run()
