@@ -1,11 +1,11 @@
 import urllib2
 import re
 import HTMLParser
+from bs4 import BeautifulSoup
 from core import base
 from core.db import Base, session_scope
 from core.auth import Auth
 from sqlalchemy import Column, Integer, String
-from BeautifulSoup import BeautifulSoup
 
 class TitleRegex(Base):
     __tablename__ = 'title_regex'

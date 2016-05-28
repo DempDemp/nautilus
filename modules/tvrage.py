@@ -1,8 +1,8 @@
 import time
 import urllib
 import urllib2
+from bs4 import BeautifulSoup
 from core import base
-from BeautifulSoup import BeautifulSoup
 
 class TVRage(base.baseClass):
     def purify(self, s):

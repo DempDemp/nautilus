@@ -1,7 +1,7 @@
 import urllib
 import urllib2
+from bs4 import BeautifulSoup
 from core import base
-from BeautifulSoup import BeautifulSoup
 
 class DownForMe(base.baseClass):
     @classmethod

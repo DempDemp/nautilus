@@ -1,4 +1,5 @@
-import urllib, urllib2
+import urllib
+import urllib2
 from core import base
 
 class truerandomClass(base.baseClass):

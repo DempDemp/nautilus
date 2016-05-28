@@ -1,9 +1,9 @@
 import random
 import urllib
 import urllib2
+from bs4 import BeautifulSoup
 from core import base
 from truerandom import truerandomClass
-from BeautifulSoup import BeautifulSoup
 
 class Gimetria(base.baseClass):
     def isReal(self, txt):
