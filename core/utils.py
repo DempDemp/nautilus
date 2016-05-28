@@ -9,6 +9,17 @@ def split_address(address):
     hostname = address.split('@', 1)[1]
     return nickname, username, hostname
 
+def paragraphy_string(s):
+    ''' converts a string into a single paragraph '''
+    paragraph = []
+    for sentence in s.splitlines():
+        sentence = sentence.strip()
+        if sentence:
+            if not sentence.endswith('.'):
+                sentence += '.'
+            paragraph.append(sentence)
+    return ' '.join(paragraph)
+
 class KeyValue(Base):
     __tablename__ = 'keyvalue'
 
