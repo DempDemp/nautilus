@@ -2,11 +2,12 @@ import random
 import urllib
 import urllib2
 from bs4 import BeautifulSoup
-from core import base
+from core.base import baseClass, command
+from core.utils import split_address
 from truerandom import truerandomClass
 
-class Gimetria(base.baseClass):
-    def gimetria(self, text):
+class Gimetria(baseClass):
+    def get_random_term(self, text):
         soup = BeautifulSoup(urllib2.urlopen('http://www.c2kb.com/gematria/?showcurse=on&word=' + urllib.quote_plus(text)))
         definitions = []
         for row in soup.find('table', class_='gematria-table').find('tbody').findChildren('tr'):
@@ -21,13 +22,13 @@ class Gimetria(base.baseClass):
                 num = int(rand['result'])
         return definitions[num]
 
-    def on_privmsg(self, address, target, text):
-        if text[0] in base.prefix and text.strip().split(' ', 1)[0][1:] in ('gimetria', 'gi', 'ask') and len(text.split()) >= 2:
-            nickname = address.split('!', 1)[0]
-            q = ' '.join(text.split()[1:])
-            try:
-                definition = self.gimetria(q)
-            except (urllib2.HTTPError, AttributeError):
-                self.irc.msg(target, 'gimetria: error retrieving list')
-            else:
-                self.irc.msg(target, u'{}: {}'.format(nickname, definition))
+    @command(['gimetria', 'gi', 'ask'], min_params=1)
+    def gimetria(self, target, address, params, **kwargs):
+        nickname, username, hostname = split_address(address)
+        q = ' '.join(params)
+        try:
+            definition = self.get_random_term(q)
+        except (urllib2.HTTPError, AttributeError):
+            self.irc.msg(target, 'gimetria: error retrieving list')
+        else:
+            self.irc.msg(target, u'{}: {}'.format(nickname, definition))

@@ -1,8 +1,8 @@
 import wolframalpha
-from core import base
+from core.base import baseClass, command
 from core.conf import settings
 
-class WolframAlpha(base.baseClass):
+class WolframAlpha(baseClass):
     client = None
     show_pods = 3
     results = None
@@ -26,20 +26,20 @@ class WolframAlpha(base.baseClass):
                 count += 1
         return True
 
-    def on_privmsg(self, address, target, text):
-        if text[0] in base.prefix and text.strip().split(' ', 1)[0][1:] == 'wa':
-            second_word = text.strip().split()[1]
-            if len(text.strip().split()) == 2 and second_word.isdigit():
-                num = int(second_word)
-                if num > 0 and num <= len(self.results):
-                    self.irc.msg(target, self.results[num - 1])
-            else:
-                query = ' '.join(text.strip().split()[1:])
-                if self.query(query):
-                    if len(self.results) <= self.show_pods:
-                        self.irc.msg(target, ' '.join(self.results))
-                    else:
-                        self.irc.msg(target, ' '.join(self.results[:self.show_pods]))
-                        self.irc.msg(target, u'Additional results: {}'.format(' | '.join(self.titles[self.show_pods:])))
+    @command(['wa', 'wolframalpha'], min_params=1)
+    def wolframalpha(self, target, params, **kwargs):
+        param = params[0]
+        if len(params) == 2 and param.isdigit():
+            num = int(param)
+            if num > 0 and num <= len(self.results):
+                self.irc.msg(target, self.results[num - 1])
+        else:
+            query = ' '.join(params)
+            if self.query(query):
+                if len(self.results) <= self.show_pods:
+                    self.irc.msg(target, ' '.join(self.results))
                 else:
-                    self.irc.msg(target, u'{bold}WolframAlpha{bold} Unable to compute'.format(bold=chr(2)))
+                    self.irc.msg(target, ' '.join(self.results[:self.show_pods]))
+                    self.irc.msg(target, u'Additional results: {}'.format(' | '.join(self.titles[self.show_pods:])))
+            else:
+                self.irc.msg(target, u'{bold}WolframAlpha{bold} Unable to compute'.format(bold=chr(2)))
