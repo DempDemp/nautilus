@@ -3,18 +3,21 @@ from collections import defaultdict
 
 # bot commands prefix
 prefix = r'^[`~!@#$%^&*()_-+=[];:\'"\|,<.>/?]'
+TARGET_CHANNEL = 1
+TARGET_SELF = 2
+TARGET_BOTH = 3
 
 class CommandArguments(object):
-    def __init__(self, command, events, min_params, prefix):
+    def __init__(self, command, events, min_params, prefix, target):
         self.command = command if isinstance(command, list) else [command]
         self.events = events if isinstance(events, list) else [events]
         self.min_params = min_params
         self.prefix = prefix
+        self.target = target
 
-
-def command(command, events='on_privmsg', min_params=0, prefix=prefix):
+def command(command, events='on_privmsg', min_params=0, prefix=prefix, target=TARGET_BOTH):
     def _decorator(func):
-        args = CommandArguments(command, events, min_params, prefix)
+        args = CommandArguments(command, events, min_params, prefix, target)
         def __decorator(*args, **kwargs):
             return func(*args, **kwargs)
         __decorator._cmd_args = args
@@ -38,12 +41,26 @@ class baseClass(object):
         self._commands = commands
 
     def _process_event(self, event, address, target, text):
+        cmd = text.strip().split(' ', 1)[0]
+        if target.startswith('#'):
+            target_flag = TARGET_CHANNEL
+        elif target == self.irc.nickname:
+            target_flag = TARGET_SELF
+        else:
+            target_flag = 0
         for func in self._commands[event]:
             cmd_args = func._cmd_args
-            cmd = text.strip().split(' ', 1)[0][1:]
-            if text[0] in cmd_args.prefix and cmd in cmd_args.command and len(text.split()) >= cmd_args.min_params + 1:
+            if not cmd_args.target & target_flag:
+                continue
+            if cmd_args.prefix:
+                if text[0] not in cmd_args.prefix:
+                    continue
+                fcmd = cmd[1:]
+            else:
+                fcmd = cmd
+            if fcmd in cmd_args.command and len(text.split()) >= cmd_args.min_params + 1:
                 params = text.strip().split()[1:]
-                func(event=event, address=address, target=target, text=text, cmd=cmd, params=params)
+                func(event=event, address=address, target=target, text=text, cmd=fcmd, params=params)
 
     ''' following functions handle triggers '''
     def on_signedon(self):
