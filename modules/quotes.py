@@ -3,7 +3,7 @@ from random import randint
 from core.db import Base, session_scope
 from core.auth import Auth
 from core.base import baseClass, command, TARGET_CHANNEL, TARGET_SELF
-from core.utils import split_address
+from core.utils import Whitelist, split_address
 from sqlalchemy import Column, Integer, String, DateTime, Boolean, UniqueConstraint
 from sqlalchemy.sql import func
 
@@ -61,7 +61,7 @@ class Quotes(baseClass):
     def add_quote(self, target, address, params, **kwargs):
         nickname, username, hostname = split_address(address)
         user = self.irc.network.get_user_by_nickname(nickname)
-        if not user or not user.networkauth or not target.startswith('#'):
+        if not target.startswith('#') or not user or not user.networkauth or Whitelist.has_permission(self.irc.id, user.networkauth, 'block_addquote'):
             return
         quote_id = Quote.add(self.irc.id, target, address, user.networkauth, ' '.join(params))
         self.irc.msg(target, 'Quote #{} added'.format(quote_id))
