@@ -63,7 +63,7 @@ class Twitter(base.baseClass):
             return False
 
     def follow_mentions_thread(self):
-        while self.api and self.tweet_channel:
+        while self.api and self.tweet_channel and self.interval:
             self.irc.logger.debug('Twitter: checking for new mentions')
             lastId = KeyValue.get_value(self.irc.id, 'TWITTER_LAST_MENTION_ID')
             statuses = self.api.GetMentions(since_id=lastId, count=5)
