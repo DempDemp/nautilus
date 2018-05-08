@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from core import base
 from core.db import Base, session_scope
 from core.auth import Auth
+from core.utils import Whitelist, split_address
 from sqlalchemy import Column, Integer, String
 
 class TitleRegex(Base):
@@ -53,11 +54,15 @@ class Titles(base.baseClass):
     def get_title(self, url):
         soup = BeautifulSoup(urllib2.urlopen(url))
         title = h.unescape(soup.title.string)
-        title = ' '.join(title.replace('\r', '').replace('\n', '').split())
+        title = ' '.join(title.splitlines())
         return url, title
 
     def on_privmsg(self, address, target, text):
         if target.startswith('#') and 'http' in text:
+            nickname, username, hostname = split_address(address)
+            user = self.irc.network.get_user_by_nickname(nickname)
+            if user and user.networkauth and Whitelist.has_permission(self.irc.id, user.networkauth, 'block_titles'):
+                return
             for regex in self.regexps:
                 titlesearch = regex.search(text)
                 if titlesearch is not None:
