@@ -10,10 +10,8 @@ class Gimetria(baseClass):
     def get_random_term(self, text):
         soup = BeautifulSoup(urllib2.urlopen('http://www.c2kb.com/gematria/?showcurse=on&word=' + urllib.quote_plus(text)))
         definitions = []
-        for row in soup.find('table', class_='gematria-table').find('tbody').findChildren('tr'):
-            tds = row.findAll('td')
-            if len(tds) == 7:
-                definitions.append(row.findAll('td')[1].text)
+        for row in soup.findAll('ul', class_='gematria-line'):
+            definitions.append(row.findAll('li')[0].text)
         if definitions:
             rand = truerandomClass.truerandom(0, len(definitions), 10, 1)
             if 'error' in rand or not rand['result'].is_digit():
