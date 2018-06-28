@@ -1,3 +1,4 @@
+import re
 from core import base
 from time import sleep
 from twitter import Api, TwitterError
@@ -5,8 +6,11 @@ from core.db import Base, session_scope
 from core.auth import Auth
 from core.conf import settings
 from threading import Thread
-from core.utils import KeyValue, Whitelist, split_address
+from core.utils import KeyValue, Whitelist, split_address, paragraphy_string
 from sqlalchemy import Column, Integer, String
+from six.moves.html_parser import HTMLParser
+
+html_parser = HTMLParser()
 
 class Tweet(Base):
     __tablename__ = 'twitter_tweets'
@@ -42,6 +46,7 @@ class Twitter(base.baseClass):
     thread_mentions = None
     interval = settings.TWITTER_INTERVAL
     tweet_channel = settings.TWITTER_TWEET_CHANNEL
+    tweet_regex = re.compile(r'(?:http(?:s)?://)?(?:www\.)?twitter\.com\/[\w\-]+\/status\/(\d+)')
 
     def __init__(self, *args, **kwargs):
         super(Twitter, self).__init__(*args, **kwargs)
@@ -115,11 +120,39 @@ class Twitter(base.baseClass):
         else:
             return 'No api defined'
 
+    def get_status(self, status_id):
+        if self.api:
+            url = '%s/statuses/show.json' % (self.api.base_url)
+            parameters = {
+                'id': int(status_id),
+                'trim_user': False,
+                'include_my_retweet': True,
+                'include_entities': True,
+                'include_ext_alt_text': True,
+                'tweet_mode': 'extended'
+            }
+            resp = self.api._RequestUrl(url, 'GET', data=parameters)
+            return self.api._ParseAndCheckTwitter(resp.content.decode('utf-8'))
+
     def on_signedon(self):
         sleep(15)
         self.follow_mentions()
 
     def on_privmsg(self, address, target, text):
+        if target.startswith('#') and 'http' in text and self.api:
+            status_search = self.tweet_regex.search(text)
+            if status_search is not None:
+                status_id = status_search.groups()[0]
+                try:
+                    tweet = self.get_status(status_id)
+                except TwitterError:
+                    pass
+                else:
+                    message = u''
+                    if tweet['user']['verified']:
+                        message += u'{bold}\u2713{bold}'.format(bold=chr(2))
+                    message += u'{bold}@{screen_name}{bold} {italics}({name}){italics}: {full_text}'.format(bold=chr(2), italics=chr(29), screen_name=tweet['user']['screen_name'], name=tweet['user']['name'], full_text=paragraphy_string(html_parser.unescape(tweet['full_text'])))
+                    self.irc.msg(target, message)
         if target == self.tweet_channel:
             if text[0] not in base.prefix:
                 return
