@@ -107,7 +107,7 @@ class Titles(base.baseClass):
                     else:
                         self.irc.notice(nickname, 'Unable to delete regex')
             elif params[1] == 'list':
-                regexps = TitleRegex.list_regexes(self.irc.id)
+                regexes = TitleRegex.list_regexes(self.irc.id)
                 self.irc.notice(nickname, 'Id Regex')
                 for x in regexes:
                     self.irc.notice(nickname, '%s %s' % x)
