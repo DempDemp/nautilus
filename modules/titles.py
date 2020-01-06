@@ -1,5 +1,6 @@
 import urllib2
 import re
+import requests
 import HTMLParser
 from bs4 import BeautifulSoup
 from core import base
@@ -52,10 +53,11 @@ class Titles(base.baseClass):
             self.regexps.append(re.compile(regex))
 
     def get_title(self, url):
-        soup = BeautifulSoup(urllib2.urlopen(url))
+        r = requests.get(url)
+        soup = BeautifulSoup(r.content)
         title = h.unescape(soup.title.string)
         title = ' '.join(title.splitlines())
-        return url, title
+        return r, url, title
 
     def on_privmsg(self, address, target, text):
         if target.startswith('#') and 'http' in text:
@@ -68,7 +70,11 @@ class Titles(base.baseClass):
                 if titlesearch is not None:
                     link = titlesearch.group(1)
                     try:
-                        url, title = self.get_title(link)
+                        self.irc.logger.info('Trying to get title from URL: %s', link)
+                        r, url, title = self.get_title(link)
+                        if r.status_code != 200:
+                            self.irc.logger.error('Titles failed for URL: %s - %s', link, r.status_code)
+                            raise urllib2.HTTPError
                     except (urllib2.HTTPError, AttributeError) as e:
                         self.irc.logger.exception(e)
                         self.irc.msg(target, 'Unable to retrieve title')
@@ -107,8 +113,8 @@ class Titles(base.baseClass):
                     else:
                         self.irc.notice(nickname, 'Unable to delete regex')
             elif params[1] == 'list':
-                regexes = TitleRegex.list_regexes(self.irc.id)
+                regexps = TitleRegex.list_regexes(self.irc.id)
                 self.irc.notice(nickname, 'Id Regex')
-                for x in regexes:
+                for x in regexps:
                     self.irc.notice(nickname, '%s %s' % x)
                 self.irc.notice(nickname, 'End of list')
