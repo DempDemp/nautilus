@@ -1,8 +1,11 @@
 import urllib
 import urllib2
+import HTMLParser
 from bs4 import BeautifulSoup
 from core.base import baseClass, command
 from core.utils import paragraphy_string
+
+h = HTMLParser.HTMLParser()
 
 class EmptyResult(Exception):
     pass
@@ -12,9 +15,9 @@ class UrbanDictionary(baseClass):
         soup = BeautifulSoup(urllib2.urlopen('https://www.urbandictionary.com/define.php?term=' + urllib.quote_plus(term)))
         definitions = []
         for definition in soup.findAll('div', {'data-defid': True}, class_='def-panel'):
-            word = definition.find(class_='word').text
-            meaning = definition.find(class_='meaning').text.strip()
-            example = definition.find(class_='example').text.strip()
+            word = ' '.join(h.unescape(definition.find(class_='word').text).splitlines())
+            meaning = ' '.join(h.unescape(definition.find(class_='meaning').text.strip()).splitlines())
+            example = ' '.join(h.unescape(definition.find(class_='example').text.strip()).splitlines())
             definitions.append({'word': word, 'meaning': meaning, 'example': example})
         if not definitions:
             raise EmptyResult
