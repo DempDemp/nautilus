@@ -2,11 +2,13 @@ import wolframalpha
 from core.base import baseClass, command
 from core.conf import settings
 
+SHOW_PODS = 3
+
+class NoResults(Exception):
+    pass
+
 class WolframAlpha(baseClass):
     client = None
-    show_pods = 3
-    results = None
-    titles = None
 
     def __init__(self, *args, **kwargs):
         super(WolframAlpha, self).__init__(*args, **kwargs)
@@ -14,32 +16,52 @@ class WolframAlpha(baseClass):
 
     def query(self, query):
         response = self.client.query(query)
-        count = 1
-        self.results = []
-        self.titles = []
-        if len(response.pods) == 0:
-            return False
-        for pod in response.pods:
-            if pod.text != 'None' and pod.text is not None:
-                self.results.append(u'{bold}({count}) {title}:{bold} {result}'.format(bold=chr(2), count=count, title=pod.title, result=pod.text.replace('\n', ' | ')))
-                self.titles.append(u'{bold}({count}) {title}'.format(bold=chr(2), count=count, title=pod.title))
-                count += 1
-        return True
+        if not response.pods:
+            raise NoResults
+        return response.pods[0], [pod for idx, pod in enumerate(response.pods) if idx and pod.text]
 
-    @command(['wa', 'wolframalpha'], min_params=1)
-    def wolframalpha(self, target, params, **kwargs):
-        param = params[0]
-        if len(params) == 2 and param.isdigit():
-            num = int(param)
-            if num > 0 and num <= len(self.results):
-                self.irc.msg(target, self.results[num - 1])
+    @command(['wa'], min_params=1)
+    def wolframalpha_short(self, target, params, **kwargs):
+        if len(params) == 2 and params[0].isdigit():
+            num = int(params.pop(0))
         else:
-            query = ' '.join(params)
-            if self.query(query):
-                if len(self.results) <= self.show_pods:
-                    self.irc.msg(target, ' '.join(self.results))
-                else:
-                    self.irc.msg(target, ' '.join(self.results[:self.show_pods]))
-                    self.irc.msg(target, u'Additional results: {}'.format(' | '.join(self.titles[self.show_pods:])))
+            num = 1
+        try:
+            query, results = self.query(' '.join(params))
+        except NoResults:
+            return self.irc.msg(target, u'{bold}WolframAlpha{bold}: Unable to compute'.format(bold=chr(2)))
+        if num > len(results):
+            num = len(results)
+        pod = results[num - 1]
+        result = u''
+        if pod.title != 'Result':
+            result = u'{italics}({title}){italics} '.format(italics=chr(29), title='; '.join(pod.title.splitlines()))
+        self.irc.msg(target, u'[{num}/{max_num}] {query}: {result}'.format(
+            num=num,
+            max_num=len(results),
+            query='; '.join(query.text.splitlines()),
+            result=result + '; '.join(pod.text.splitlines())[:150],
+        ))
+
+    @command(['wa-ext', 'wolframalpha'], min_params=1)
+    def wolframalpha_ext(self, target, params, **kwargs):
+        try:
+            query, results = self.query(' '.join(params))
+        except NoResults:
+            return self.irc.msg(target, u'{bold}WolframAlpha{bold}: Unable to compute'.format(bold=chr(2)))
+        msg = []
+        additional = []
+        for idx, pod in enumerate(results):
+            if idx >= SHOW_PODS:
+                additional.append(u'{}. {}'.format(idx + 1, '; '.join(pod.title.splitlines())))
             else:
-                self.irc.msg(target, u'{bold}WolframAlpha{bold} Unable to compute'.format(bold=chr(2)))
+                msg.append(u'{idx}. {bold}{title}{bold}: {result}'.format(
+                    bold=chr(2),
+                    idx=idx + 1,
+                    title='; '.join(pod.title.splitlines()),
+                    result='; '.join(pod.text.splitlines())[:150],
+                ))
+        msg = u'{}: '.format('; '.join(query.text.splitlines())) + u' '.join(msg)
+        if additional:
+            msg += u' {bold}More{bold}: {additional}'.format(bold=chr(2), additional=u' '.join(additional))
+        self.irc.msg(target, msg)
