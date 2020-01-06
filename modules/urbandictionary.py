@@ -1,67 +1,55 @@
-import wolframalpha
+import urllib
+import urllib2
+import HTMLParser
+from bs4 import BeautifulSoup
 from core.base import baseClass, command
-from core.conf import settings
+from core.utils import paragraphy_string
 
-SHOW_PODS = 3
+h = HTMLParser.HTMLParser()
 
-class NoResults(Exception):
+class EmptyResult(Exception):
     pass
 
-class WolframAlpha(baseClass):
-    client = None
+class UrbanDictionary(baseClass):
+    def get_definitions(self, term):
+        soup = BeautifulSoup(urllib2.urlopen('https://www.urbandictionary.com/define.php?term=' + urllib.quote_plus(term)))
+        definitions = []
+        for definition in soup.findAll('div', {'data-defid': True}, class_='def-panel'):
+            word = ' '.join(h.unescape(definition.find(class_='word').text).splitlines())
+            meaning = ' '.join(h.unescape(definition.find(class_='meaning').text.strip()).splitlines())
+            example = ' '.join(h.unescape(definition.find(class_='example').text.strip()).splitlines())
+            definitions.append({'word': word, 'meaning': meaning, 'example': example})
+        if not definitions:
+            raise EmptyResult
+        return definitions
 
-    def __init__(self, *args, **kwargs):
-        super(WolframAlpha, self).__init__(*args, **kwargs)
-        self.client = wolframalpha.Client(settings.WOLFRAMALPHA_API_KEY)
-
-    def query(self, query):
-        response = self.client.query(query)
-        if not response.pods:
-            raise NoResults
-        return response.pods[0], [pod for idx, pod in enumerate(response.pods) if idx and pod.text]
-
-    @command(['wa'], min_params=1)
-    def wolframalpha_short(self, target, params, **kwargs):
-        if len(params) == 2 and params[0].isdigit():
+    @command(['ud', 'urbandictionary'], min_params=1)
+    def get_definition(self, target, params, **kwargs):
+        if len(params) >= 2 and params[0].isdigit():
             num = int(params.pop(0))
         else:
             num = 1
+        term = ' '.join(params)
+        definition = None
         try:
-            query, results = self.query(' '.join(params))
-        except NoResults:
-            return self.irc.msg(target, u'{bold}WolframAlpha{bold}: Unable to compute'.format(bold=chr(2)))
-        if num > len(results):
-            num = len(results)
-        pod = results[num - 1]
-        result = u''
-        if pod.title != 'Result':
-            result = u'{italics}({title}){italics} '.format(italics=chr(29), title='; '.join(pod.title.splitlines()))
-        self.irc.msg(target, u'[{num}/{max_num}] {query}: {result}'.format(
-            num=num,
-            max_num=len(results),
-            query='; '.join(query.text.splitlines()),
-            result=result + '; '.join(pod.text.splitlines())[:150],
-        ))
-
-    @command(['wa-ext', 'wolframalpha'], min_params=1)
-    def wolframalpha_ext(self, target, params, **kwargs):
-        try:
-            query, results = self.query(' '.join(params))
-        except NoResults:
-            return self.irc.msg(target, u'{bold}WolframAlpha{bold}: Unable to compute'.format(bold=chr(2)))
-        msg = []
-        additional = []
-        for idx, pod in enumerate(results):
-            if idx >= SHOW_PODS:
-                additional.append(u'{}. {}'.format(idx + 1, '; '.join(pod.title.splitlines())))
-            else:
-                msg.append(u'{idx}. {bold}{title}{bold}: {result}'.format(
-                    bold=chr(2),
-                    idx=idx + 1,
-                    title='; '.join(pod.title.splitlines()),
-                    result='; '.join(pod.text.splitlines())[:150],
-                ))
-        msg = u'{}: '.format('; '.join(query.text.splitlines())) + u' '.join(msg)
-        if additional:
-            msg += u' {bold}More{bold}: {additional}'.format(bold=chr(2), additional=u' '.join(additional))
-        self.irc.msg(target, msg)
+            definitions = self.get_definitions(term)
+            definition = definitions[num - 1]
+        except IndexError:
+            definition = definitions[-1]
+            num = len(definitions)
+        except EmptyResult:
+            self.irc.msg(target, 'UrbanDictionary: No results found')
+        except urllib2.HTTPError:
+            self.irc.msg(target, 'UrbanDictionary: Unable to retrieve definition')
+        if definition:
+            max_len = 500
+            meaning = paragraphy_string(definition['meaning'])
+            example = paragraphy_string(definition['example'])
+            message = u'[{num}/{max_num}] {italics}{bold}{word}{bold}{italics}: '.format(bold=chr(2), italics=chr(29), num=num, max_num=len(definitions), word=definition['word'])
+            max_len -= len(message)
+            message += meaning[:max_len - 3] + u'...' if len(meaning) > max_len else meaning
+            max_len -= len(message)
+            if max_len > 15:
+                example_text = example[:max_len - 3] + u'...' if len(example) > max_len else example
+                message += u' {italics}{example}{italics}'.format(italics=chr(29), example=example_text)
+            self.irc.msg(target, message)
